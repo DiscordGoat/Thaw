@@ -1,0 +1,7 @@
+name: Thaw
+version: '${project.version}'
+main: goat.thaw.Thaw
+api-version: '1.21'
+load: STARTUP
+authors: [ DiscordGoat ]
+description: A Frozen Survival Minecraft Project 
