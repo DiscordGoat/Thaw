@@ -445,6 +445,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             if (slopeAt(data, lx, lz, 220) > 2) continue; // avoid slopes
             // Prevent boulders from generating in ocean/deep ocean biomes
             try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+            // Prevent boulders where the highest block in the column is water
+            try {
+                Material topMat = highestNonAir(data, world, lx, lz);
+                if (topMat == Material.WATER) continue;
+            } catch (Throwable ignore) {}
             // Enforce spacing: skip if within 10 blocks of an existing boulder in this chunk
             if (isTooCloseToCenters(placedCenters, lx, lz, 10 * 10)) continue;
             int r = 1 + rng.nextInt(2);
@@ -477,6 +482,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             if (slopeAt(data, lx, lz, 220) > 2) continue;
             // Prevent boulders from generating in ocean/deep ocean biomes
             try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+            // Prevent boulders where the highest block in the column is water
+            try {
+                Material topMat = highestNonAir(data, world, lx, lz);
+                if (topMat == Material.WATER) continue;
+            } catch (Throwable ignore) {}
             if (isTooCloseToCenters(placedCenters, lx, lz, 10 * 10)) continue;
             int r = 1 + rng.nextInt(2);
             for (int dx = -r; dx <= r; dx++) {
@@ -502,6 +512,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             if (dx * dx + dz * dz < minDistSq) return true;
         }
         return false;
+    }
+
+    // Returns the highest non-air material in the column (lx,lz) within world bounds
+    private Material highestNonAir(ChunkData data, World world, int lx, int lz) {
+        int yTop = Math.min(world.getMaxHeight() - 1, AUDIT_Y_MAX);
+        int yBottom = Math.max(world.getMinHeight(), AUDIT_Y_MIN);
+        for (int y = yTop; y >= yBottom; y--) {
+            Material m = data.getType(lx, y, lz);
+            if (m != Material.AIR) return m;
+        }
+        return Material.AIR;
     }
 
     private void placeOres(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
@@ -1152,11 +1173,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     double s = (oceanFactor - 0.25) / (0.80 - 0.25); // 0 near land, 1 near sea
                     if (s > 0 && s < 1 && finalSurf <= OCEAN_SEA_LEVEL + 12) {
                         s = clamp01(s);
-                        int beachCap = OCEAN_SEA_LEVEL + (int) Math.round(2.0 * (1.0 - s)); // 2 above -> 0 near water (smooth to sea level)
-                        if (finalSurf > beachCap) finalSurf = beachCap;
-                        // Sand thickness widens inland a bit
-                        int sandBelow = 4 + (int) Math.round(5.0 * (1.0 - s)); // 4..9
-                        for (int i = 0; i <= sandBelow; i++) {
+                        // Hard clamp beaches to sea level
+                        if (finalSurf > OCEAN_SEA_LEVEL) finalSurf = OCEAN_SEA_LEVEL;
+                        // Sand veneer thickness (tunable)
+                        int sandLayers = 4 + (int) Math.round(5.0 * (1.0 - s)); // 4..9
+                        for (int i = 0; i < sandLayers; i++) {
                             int y = finalSurf - i; if (y < 150) break;
                             data.setBlock(lx, y, lz, Material.SAND);
                         }
@@ -1582,7 +1603,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
     }
 
-    // Replace any stone blocks above the first encountered sand with sand (within [yMin, yMax])
+    // Replace any stone or dirt blocks above the first encountered sand with sand (within [yMin, yMax])
     private void fixStoneAboveSand(ChunkData data, int lx, int lz, int yMin, int yMax) {
         boolean seenSand = false;
         for (int y = Math.max(0, yMin); y <= Math.min(AUDIT_Y_MAX, yMax); y++) {
@@ -1590,7 +1611,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 Material m = data.getType(lx, y, lz);
                 if (m == Material.SAND) {
                     seenSand = true;
-                } else if (seenSand && m == Material.STONE) {
+                } else if (seenSand && (m == Material.STONE || m == Material.DIRT)) {
                     data.setBlock(lx, y, lz, Material.SAND);
                 }
             } catch (Throwable ignore) {}
