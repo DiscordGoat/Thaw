@@ -5,3 +5,33 @@ api-version: '1.21'
 load: STARTUP
 authors: [ DiscordGoat ]
 description: A Frozen Survival Minecraft Project 
+commands:
+  generatearctic:
+    description: Generate the Arctic dev world (void with vanilla bedrock)
+    usage: /generatearctic
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  warpto:
+    description: Warp to another world/dimension by name
+    usage: /warpto <worldname>
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  decomission:
+    description: Unload and delete the Arctic dev world
+    usage: /decomission
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  regeneratearctic:
+    description: Decommission, regenerate, and warp to the Arctic dev world
+    usage: /regeneratearctic
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  teleporttopeak:
+    description: Teleport to nearest terrain peak around you
+    usage: /teleporttopeak [radius]
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+permissions:
+  thaw.dev:
+    description: Access to development commands
+    default: op
