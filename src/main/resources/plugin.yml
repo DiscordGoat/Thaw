@@ -31,6 +31,16 @@ commands:
     usage: /teleporttopeak [radius]
     permission: thaw.dev
     permission-message: You must be op to use this.
+  statscommand:
+    description: Dev stats command
+    usage: /statscommand <get|set|add|subtract> <stat> [amount]
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  spawntrailstart:
+    description: Spawn a trail start under your feet
+    usage: /spawntrailstart
+    permission: thaw.dev
+    permission-message: You must be op to use this.
 permissions:
   thaw.dev:
     description: Access to development commands
