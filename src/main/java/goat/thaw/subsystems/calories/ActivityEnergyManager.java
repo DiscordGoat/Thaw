@@ -1,7 +1,7 @@
-package goat.thaw;
+package goat.thaw.subsystems.calories;
 
-import goat.thaw.stats.StatInstance;
-import goat.thaw.stats.StatsManager;
+import goat.thaw.system.stats.StatInstance;
+import goat.thaw.system.stats.StatsManager;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;

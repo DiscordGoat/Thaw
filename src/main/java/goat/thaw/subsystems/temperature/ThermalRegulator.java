@@ -1,7 +1,7 @@
-package goat.thaw;
+package goat.thaw.subsystems.temperature;
 
-import goat.thaw.stats.StatInstance;
-import goat.thaw.stats.StatsManager;
+import goat.thaw.system.stats.StatInstance;
+import goat.thaw.system.stats.StatsManager;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.Listener;

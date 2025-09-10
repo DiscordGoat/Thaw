@@ -1,4 +1,4 @@
-package goat.thaw.realms;
+package goat.thaw.resources;
 
 import org.bukkit.Location;
 import org.bukkit.Material;

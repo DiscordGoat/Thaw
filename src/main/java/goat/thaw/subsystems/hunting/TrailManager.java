@@ -1,11 +1,10 @@
-package goat.thaw.hunting;
+package goat.thaw.subsystems.hunting;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.World;
-import org.bukkit.DyeColor;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.type.Snow;
 import org.bukkit.entity.Animals;
@@ -13,7 +12,6 @@ import org.bukkit.entity.Chicken;
 import org.bukkit.entity.Cow;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Monster;
 import org.bukkit.entity.Sheep;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;

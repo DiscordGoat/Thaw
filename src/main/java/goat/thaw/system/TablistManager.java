@@ -1,7 +1,8 @@
-package goat.thaw;
+package goat.thaw.system;
 
-import goat.thaw.stats.StatInstance;
-import goat.thaw.stats.StatsManager;
+import goat.thaw.subsystems.combat.PopulationManager;
+import goat.thaw.system.stats.StatInstance;
+import goat.thaw.system.stats.StatsManager;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;

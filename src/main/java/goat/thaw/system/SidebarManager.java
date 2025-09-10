@@ -1,7 +1,7 @@
-package goat.thaw;
+package goat.thaw.system;
 
-import goat.thaw.stats.StatInstance;
-import goat.thaw.stats.StatsManager;
+import goat.thaw.system.stats.StatInstance;
+import goat.thaw.system.stats.StatsManager;
 import org.bukkit.ChatColor;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
@@ -34,6 +34,8 @@ public class SidebarManager implements Listener {
         String lastCal;
         String lastOxy;
         CalorieAnimation calAnim;
+        TempAnimation tempAnim;
+        OxyAnimation oxyAnim;
     }
 
     private static class CalorieAnimation {
@@ -42,6 +44,22 @@ public class SidebarManager implements Listener {
         int remaining;     // ticks left in animation
         int step;          // per-tick step size (>=1)
         int direction;     // -1 or +1
+    }
+
+    private static class TempAnimation {
+        int displayedTenths; // temperature * 10
+        int targetTenths;
+        int remaining;
+        int step;            // step in tenths per tick (>=1)
+        int direction;       // -1 or +1
+    }
+
+    private static class OxyAnimation {
+        int displayed;  // oxygen integer
+        int target;
+        int remaining;
+        int step;
+        int direction;
     }
 
     private final Map<UUID, PlayerSidebar> sidebars = new HashMap<>();
@@ -90,18 +108,21 @@ public class SidebarManager implements Listener {
             ensureBoard(p);
             PlayerSidebar ps = sidebars.get(p.getUniqueId());
 
-            // Get player's Temperature stat (fallback 72.0 if missing)
-            double temp = 72.0;
+            // Temperature with animation (tenths precision)
+            double tempActual = 72.0;
             StatInstance inst = stats.get(p.getUniqueId(), "Temperature");
-            if (inst != null) temp = inst.get();
+            if (inst != null) tempActual = inst.get();
+            int targetTenths = (int)Math.round(tempActual * 10.0);
+            ps.tempAnim = updateTempAnimation(ps.tempAnim, targetTenths);
+            double tempDisplay = ps.tempAnim.displayedTenths / 10.0;
 
             ChatColor tempColor;
-            if (temp >= 65.0 && temp <= 85.0) tempColor = ChatColor.GREEN; // comfortable
-            else if ((temp >= 35.0 && temp < 65.0) || (temp > 85.0 && temp <= 110.0)) tempColor = ChatColor.YELLOW; // caution
+            if (tempDisplay >= 65.0 && tempDisplay <= 85.0) tempColor = ChatColor.GREEN; // comfortable
+            else if ((tempDisplay >= 35.0 && tempDisplay < 65.0) || (tempDisplay > 85.0 && tempDisplay <= 110.0)) tempColor = ChatColor.YELLOW; // caution
             else tempColor = ChatColor.RED; // dangerous
 
             String text = ChatColor.RED + "Temperature: "
-                    + tempColor + String.format(Locale.US, "%.1f", temp)
+                    + tempColor + String.format(Locale.US, "%.1f", tempDisplay)
                     + ChatColor.RED + " F" + ChatColor.RESET;
 
             if (ps.lastTemp != null && !ps.lastTemp.equals(text)) {
@@ -129,14 +150,17 @@ public class SidebarManager implements Listener {
             sCal.setScore(2);
             ps.lastCal = calText;
         
-            // Oxygen
-            double oxy = 0.0;
+            // Oxygen with animation (integer display)
+            double oxyActual = 0.0;
             double oxyMax = 1000.0;
             StatInstance oxyInst = stats.get(p.getUniqueId(), "Oxygen");
-            if (oxyInst != null) { oxy = oxyInst.get(); oxyMax = oxyInst.getDefinition().getMax(); }
-            double pct = oxyMax > 0 ? (oxy / oxyMax) : 0.0;
+            if (oxyInst != null) { oxyActual = oxyInst.get(); oxyMax = oxyInst.getDefinition().getMax(); }
+            int oxyTarget = (int)Math.round(oxyActual);
+            ps.oxyAnim = updateOxyAnimation(ps.oxyAnim, oxyTarget);
+            int oxyDisplay = ps.oxyAnim.displayed;
+            double pct = oxyMax > 0 ? (oxyDisplay / oxyMax) : 0.0;
             ChatColor oxyNumColor = (pct >= 0.5) ? ChatColor.GREEN : (pct >= 0.2 ? ChatColor.YELLOW : ChatColor.RED);
-            String oxyText = ChatColor.AQUA + "Oxygen: " + oxyNumColor + String.format(Locale.US, "%.0f", oxy) + ChatColor.RESET;
+            String oxyText = ChatColor.AQUA + "Oxygen: " + oxyNumColor + String.format(Locale.US, "%.0f", (double)oxyDisplay) + ChatColor.RESET;
             if (ps.lastOxy != null && !ps.lastOxy.equals(oxyText)) {
                 ps.board.resetScores(ps.lastOxy);
             }
@@ -190,6 +214,68 @@ public class SidebarManager implements Listener {
             anim.step = 0;
             anim.direction = 0;
         }
+        return anim;
+    }
+
+    private TempAnimation updateTempAnimation(TempAnimation anim, int newTargetTenths) {
+        final int LIFESPAN_TICKS = 40;
+        if (anim == null) {
+            anim = new TempAnimation();
+            anim.displayedTenths = newTargetTenths;
+            anim.targetTenths = newTargetTenths;
+            anim.remaining = 0;
+            anim.step = 0;
+            anim.direction = 0;
+            return anim;
+        }
+        if (newTargetTenths != anim.targetTenths) {
+            if (anim.remaining <= 0) anim.remaining = LIFESPAN_TICKS;
+            anim.targetTenths = newTargetTenths;
+            int diff = Math.abs(anim.targetTenths - anim.displayedTenths);
+            anim.direction = (anim.targetTenths >= anim.displayedTenths) ? 1 : -1;
+            anim.step = Math.max(1, (int)Math.ceil(diff / (double)Math.max(1, anim.remaining)));
+        }
+        if (anim.displayedTenths == anim.targetTenths) {
+            anim.remaining = 0; anim.step = 0; anim.direction = 0; return anim;
+        }
+        int next = anim.displayedTenths + anim.direction * anim.step;
+        if ((anim.direction > 0 && next > anim.targetTenths) || (anim.direction < 0 && next < anim.targetTenths)) {
+            next = anim.targetTenths;
+        }
+        anim.displayedTenths = next;
+        anim.remaining = Math.max(0, anim.remaining - 1);
+        if (anim.displayedTenths == anim.targetTenths) { anim.step = 0; anim.direction = 0; }
+        return anim;
+    }
+
+    private OxyAnimation updateOxyAnimation(OxyAnimation anim, int newTarget) {
+        final int LIFESPAN_TICKS = 40;
+        if (anim == null) {
+            anim = new OxyAnimation();
+            anim.displayed = newTarget;
+            anim.target = newTarget;
+            anim.remaining = 0;
+            anim.step = 0;
+            anim.direction = 0;
+            return anim;
+        }
+        if (newTarget != anim.target) {
+            if (anim.remaining <= 0) anim.remaining = LIFESPAN_TICKS;
+            anim.target = newTarget;
+            int diff = Math.abs(anim.target - anim.displayed);
+            anim.direction = (anim.target >= anim.displayed) ? 1 : -1;
+            anim.step = Math.max(1, (int)Math.ceil(diff / (double)Math.max(1, anim.remaining)));
+        }
+        if (anim.displayed == anim.target) {
+            anim.remaining = 0; anim.step = 0; anim.direction = 0; return anim;
+        }
+        int next = anim.displayed + anim.direction * anim.step;
+        if ((anim.direction > 0 && next > anim.target) || (anim.direction < 0 && next < anim.target)) {
+            next = anim.target;
+        }
+        anim.displayed = next;
+        anim.remaining = Math.max(0, anim.remaining - 1);
+        if (anim.displayed == anim.target) { anim.step = 0; anim.direction = 0; }
         return anim;
     }
 }

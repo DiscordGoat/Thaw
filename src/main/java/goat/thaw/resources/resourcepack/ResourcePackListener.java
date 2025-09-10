@@ -1,4 +1,4 @@
-package goat.thaw.resourcepack;
+package goat.thaw.resources.resourcepack;
 
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;

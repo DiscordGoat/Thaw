@@ -1,4 +1,4 @@
-package goat.thaw.hunting;
+package goat.thaw.subsystems.hunting;
 
 import org.bukkit.ChatColor;
 import org.bukkit.Location;

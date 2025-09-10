@@ -1,15 +1,21 @@
 package goat.thaw;
 
-import goat.thaw.dev.DecomissionCommand;
-import goat.thaw.dev.GenerateArcticCommand;
-import goat.thaw.dev.RegenerateArcticCommand;
-import goat.thaw.dev.WarpToCommand;
-import goat.thaw.dev.TeleportToPeakCommand;
-import goat.thaw.resourcepack.ResourcePackListener;
-import goat.thaw.stats.StatsCommand;
-import goat.thaw.stats.StatsManager;
-import goat.thaw.hunting.TrailManager;
-import goat.thaw.hunting.SpawnTrailStartCommand;
+import goat.thaw.subsystems.calories.ActivityEnergyManager;
+import goat.thaw.subsystems.combat.PopulationManager;
+import goat.thaw.subsystems.temperature.ThermalRegulator;
+import goat.thaw.system.dev.DecomissionCommand;
+import goat.thaw.system.dev.GenerateArcticCommand;
+import goat.thaw.system.dev.RegenerateArcticCommand;
+import goat.thaw.system.dev.WarpToCommand;
+import goat.thaw.system.dev.TeleportToPeakCommand;
+import goat.thaw.system.stats.StatsCommand;
+import goat.thaw.system.stats.StatsManager;
+import goat.thaw.subsystems.hunting.TrailManager;
+import goat.thaw.subsystems.hunting.SpawnTrailStartCommand;
+import goat.thaw.subsystems.calories.CalorieManager;
+import goat.thaw.system.DailyAnnouncementManager;
+import goat.thaw.system.SidebarManager;
+import goat.thaw.system.TablistManager;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class Thaw extends JavaPlugin {

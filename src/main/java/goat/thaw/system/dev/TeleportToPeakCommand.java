@@ -1,4 +1,4 @@
-package goat.thaw.dev;
+package goat.thaw.system.dev;
 
 import org.bukkit.Location;
 import org.bukkit.Material;

@@ -1,6 +1,8 @@
-package goat.thaw;
+package goat.thaw.subsystems.combat;
 
-import goat.thaw.stats.StatsManager;
+import goat.thaw.system.stats.StatsManager;
+import goat.thaw.subsystems.hunting.TrailManager;
+import goat.thaw.system.DailyAnnouncementManager;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -15,21 +17,20 @@ import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Objects;
 
 public class PopulationManager implements Listener {
 
     private final JavaPlugin plugin;
     private final StatsManager stats;
     private final DailyAnnouncementManager announcements;
-    private final goat.thaw.hunting.TrailManager trails;
+    private final TrailManager trails;
 
     private double monsterPopulation = 50.0; // initial
     private long lastDayObserved = Long.MIN_VALUE;
     private BukkitTask dayTask;
     private File stateFile;
 
-    public PopulationManager(JavaPlugin plugin, StatsManager stats, DailyAnnouncementManager announcements, goat.thaw.hunting.TrailManager trails) {
+    public PopulationManager(JavaPlugin plugin, StatsManager stats, DailyAnnouncementManager announcements, TrailManager trails) {
         this.plugin = plugin;
         this.stats = stats;
         this.announcements = announcements;
