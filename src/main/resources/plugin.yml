@@ -41,6 +41,26 @@ commands:
     usage: /spawntrailstart
     permission: thaw.dev
     permission-message: You must be op to use this.
+  floodfillalgorithm:
+    description: Dev DFS flood fill from one block above feet
+    usage: /floodfillalgorithm [rate]
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  externaltempdebug:
+    description: Toggle external temperature drift debug actionbar
+    usage: /externaltempdebug
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  dicelog:
+    description: Toggle DICE logging to file for your player
+    usage: /dicelog
+    permission: thaw.dev
+    permission-message: You must be op to use this.
+  sled:
+    description: Dev SLED airboat
+    usage: /sled
+    permission: thaw.dev
+    permission-message: You must be op to use this.
 permissions:
   thaw.dev:
     description: Access to development commands

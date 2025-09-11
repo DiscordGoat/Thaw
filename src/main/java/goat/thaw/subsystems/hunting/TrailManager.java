@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Particle;
 import org.bukkit.World;
+import org.bukkit.Sound;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.type.Snow;
 import org.bukkit.entity.Animals;
@@ -28,8 +29,10 @@ import java.util.*;
 public class TrailManager implements Listener {
 
     private static final String ANIMAL_META = "thaw.trailAnimal";
+    private static final int MAX_ACTIVE_PER_PLAYER = 2;
 
     private final JavaPlugin plugin;
+    private TrailRenderMode renderMode = TrailRenderMode.PARTICLE; // default Particle mode
     private final Map<String, ActiveTrail> activeByBlockKey = new HashMap<>();
     private final java.util.Map<java.util.UUID, ActiveTrail> byEntityId = new java.util.HashMap<>();
     private BukkitTask tickTask;
@@ -51,6 +54,9 @@ public class TrailManager implements Listener {
         int revealAttempts;
         java.util.List<Double> headingOrderDeg;
         int headingIdx;
+        // Immersive mode bookkeeping
+        java.util.Set<String> renderedPathKeys = new java.util.HashSet<>();
+        boolean startRendered;
     }
 
     private void randomTrailTick() {
@@ -64,14 +70,16 @@ public class TrailManager implements Listener {
                 lastDay.put(id, day);
                 dailySpawns.put(id, 0);
             }
+            // Respect per-player active cap
+            if (activeCountFor(id) >= MAX_ACTIVE_PER_PLAYER) return;
             int count = dailySpawns.getOrDefault(id, 0);
             if (count >= 5) return;
             // 25% chance each tick window until we hit 5/day
             if (Math.random() < 0.25) {
                 Location base = p.getLocation();
-                // pick a ring 16..48 blocks away
+                // pick a ring within 30 blocks (min ~8 to avoid feet)
                 double ang = Math.random() * Math.PI * 2.0;
-                double dist = 16.0 + Math.random() * 32.0;
+                double dist = 8.0 + Math.random() * 22.0; // 8..30
                 double tx = base.getX() + Math.cos(ang) * dist;
                 double tz = base.getZ() + Math.sin(ang) * dist;
                 World w = base.getWorld();
@@ -81,8 +89,10 @@ public class TrailManager implements Listener {
                 if (isWaterTop(w, bx, bz)) return;
                 Location blockLoc = new Location(w, bx, w.getHighestBlockYAt(bx, bz), bz);
                 if (hasStartAt(blockLoc)) return;
-                spawnTrailStart(blockLoc);
-                dailySpawns.put(id, count + 1);
+                TrailStartInstance spawned = spawnTrailStart(blockLoc, id);
+                if (spawned != null) {
+                    dailySpawns.put(id, count + 1);
+                }
             }
         });
     }
@@ -109,15 +119,22 @@ public class TrailManager implements Listener {
     }
 
     // API: spawn a single footprint at location (target set after successful path)
-    public TrailStartInstance spawnTrailStart(Location loc) {
+    public TrailStartInstance spawnTrailStart(Location loc) { return spawnTrailStart(loc, null); }
+
+    // Overload with owner for per-player caps
+    public TrailStartInstance spawnTrailStart(Location loc, UUID owner) {
         Location base = loc.clone();
         base.setX(loc.getBlockX()); base.setY(loc.getBlockY()); base.setZ(loc.getBlockZ());
-        TrailStartInstance tsi = new TrailStartInstance(null, base);
+        // Enforce per-player active trail cap if owner present
+        if (owner != null && activeCountFor(owner) >= MAX_ACTIVE_PER_PLAYER) {
+            return null;
+        }
+        TrailStartInstance tsi = new TrailStartInstance(owner, base);
         ActiveTrail at = new ActiveTrail();
         at.start = tsi; at.target = null; at.revealed = false; at.spawned = false; at.spawnedEntityId = null; at.revealTime = 0L;
         activeByBlockKey.put(blockKey(base), at);
-        // initial footprint particle (conduit effect)
-        spawnInitialFootprint(footprintCenter(base));
+        // initial footprint render based on mode
+        renderInitialFootprint(footprintCenter(base), at);
         return tsi;
     }
 
@@ -219,6 +236,15 @@ public class TrailManager implements Listener {
     // Dev helper
     public boolean hasStartAt(Location loc) { return activeByBlockKey.containsKey(blockKey(loc)); }
 
+    private int activeCountFor(UUID owner) {
+        if (owner == null) return 0;
+        int n = 0;
+        for (ActiveTrail at : activeByBlockKey.values()) {
+            if (owner.equals(at.start.getOwner())) n++;
+        }
+        return n;
+    }
+
     // Cancel natural animal spawns; allow only trail-spawned animals
     @EventHandler
     public void onCreatureSpawn(CreatureSpawnEvent e) {
@@ -247,12 +273,26 @@ public class TrailManager implements Listener {
         // emit particles for unrevealed starts
         for (ActiveTrail at : new java.util.ArrayList<>(activeByBlockKey.values())) {
             if (!at.revealed) {
-                spawnFootprintParticle(footprintCenter(at.start.getBlockLocation()));
+                if (renderMode == TrailRenderMode.PARTICLE) {
+                    spawnFootprintParticle(footprintCenter(at.start.getBlockLocation()));
+                } else {
+                    // Immersive: initial footprint was carved on spawn; avoid repeated erosion here
+                }
             } else {
                 // draw path particles intermittently
                 if (at.path != null) {
-                    for (int i = 0; i < at.path.size(); i += 2) {
-                        spawnFootprintParticle(at.path.get(i));
+                    int stepInc = (renderMode == TrailRenderMode.PARTICLE) ? 2 : 1;
+                    for (int i = 0; i < at.path.size(); i += stepInc) {
+                        Location step = at.path.get(i);
+                        if (renderMode == TrailRenderMode.PARTICLE) {
+                            spawnFootprintParticle(step);
+                        } else {
+                            String key = xyKey(step);
+                            if (!at.renderedPathKeys.contains(key)) {
+                                carveSnowFootprint(step);
+                                at.renderedPathKeys.add(key);
+                            }
+                        }
                     }
                 }
                 // check proximity for spawn (20 blocks)
@@ -555,6 +595,16 @@ public class TrailManager implements Listener {
         }
     }
 
+    private void renderInitialFootprint(Location loc, ActiveTrail at) {
+        if (renderMode == TrailRenderMode.PARTICLE) {
+            spawnInitialFootprint(loc);
+        } else {
+            carveSnowFootprint(loc);
+            playSnowBreak(loc);
+            at.startRendered = true;
+        }
+    }
+
     private static Location footprintCenter(Location blockLoc) {
         // Lift 0.3 higher than before to avoid underground clipping
         return new Location(blockLoc.getWorld(), blockLoc.getBlockX() + 0.5, blockLoc.getBlockY() + 1, blockLoc.getBlockZ() + 0.5);
@@ -563,4 +613,57 @@ public class TrailManager implements Listener {
     private static String blockKey(Location l) {
         return l.getWorld().getUID() + ":" + l.getBlockX() + ":" + l.getBlockY() + ":" + l.getBlockZ();
     }
+
+    private static String xyKey(Location l) {
+        return l.getWorld().getUID() + ":" + l.getBlockX() + ":" + l.getBlockZ();
+    }
+
+    // Mode control API
+    public TrailRenderMode getRenderMode() { return renderMode; }
+    public void setRenderMode(TrailRenderMode mode) { if (mode != null) this.renderMode = mode; }
+
+    // Immersive helper: carve a visible 3x3 footprint by shaving a single snow layer (never clearing snow)
+    private void carveSnowFootprint(Location loc) {
+        World w = loc.getWorld();
+        int cx = loc.getBlockX();
+        int cz = loc.getBlockZ();
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dz = -1; dz <= 1; dz++) {
+                // roundish mask (omit corners for a softer footprint)
+                if (Math.abs(dx) == 1 && Math.abs(dz) == 1) continue;
+                int bx = cx + dx;
+                int bz = cz + dz;
+                Block highest = w.getHighestBlockAt(bx, bz);
+                Block candidate = highest;
+                // +1 influence: if the block above the highest is a snow layer, prefer carving that
+                Block above = highest.getRelative(0, 1, 0);
+                if (above.getType() == Material.SNOW) {
+                    candidate = above;
+                }
+                try {
+                    if (candidate.getType() == Material.SNOW) {
+                        Snow snow = (Snow) candidate.getBlockData();
+                        int layers = Math.max(1, snow.getLayers());
+                        if (layers > 1) {
+                            snow.setLayers(layers - 1); // shave one layer only
+                            candidate.setBlockData(snow, false);
+                        }
+                        // if layers == 1, keep it as-is (do not clear)
+                    }
+                } catch (Throwable ignore) {
+                    // leave as-is to avoid removing snow entirely
+                }
+            }
+        }
+    }
+
+    private void playSnowBreak(Location loc) {
+        try {
+            loc.getWorld().playSound(loc, Sound.BLOCK_SNOW_BREAK, 0.6f, 1.1f);
+        } catch (Throwable ignore) {
+            try { loc.getWorld().playSound(loc, Sound.BLOCK_SNOW_STEP, 0.6f, 1.0f); } catch (Throwable ignored) {}
+        }
+    }
+
+    
 }

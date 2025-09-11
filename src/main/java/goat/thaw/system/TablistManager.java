@@ -103,7 +103,14 @@ public class TablistManager implements Listener {
 
         String worldLine = ChatColor.WHITE + "World: " + ChatColor.RED + "Monster Pop "
                 + ChatColor.WHITE + String.format(Locale.US, "%.1f", population.getMonsterPopulation());
-        String header = ChatColor.AQUA + "=== Condition ===\n" + calLine + "\n" + oxyLine + "\n" + thermalLine + "\n" + effectsLine + "\n" + worldLine;
+
+        // External temperature from DICE/Spaces
+        double ext = 0.0; // bias
+        StatInstance extInst = stats.get(p.getUniqueId(), "ExternalTemperature");
+        if (extInst != null) ext = extInst.get();
+        String extLine = ChatColor.BLUE + "External Temp: " + ChatColor.WHITE + String.format(Locale.US, "%+.1f F", ext);
+
+        String header = ChatColor.AQUA + "=== Condition ===\n" + calLine + "\n" + oxyLine + "\n" + thermalLine + "\n" + effectsLine + "\n" + worldLine + "\n" + extLine;
         String footer = "";
         try {
             p.setPlayerListHeaderFooter(header, footer);

@@ -8,15 +8,27 @@ import goat.thaw.system.dev.GenerateArcticCommand;
 import goat.thaw.system.dev.RegenerateArcticCommand;
 import goat.thaw.system.dev.WarpToCommand;
 import goat.thaw.system.dev.TeleportToPeakCommand;
+import goat.thaw.system.dev.FloodFillAlgorithmCommand;
+import goat.thaw.system.dev.ExternalTempDebugCommand;
+import goat.thaw.system.space.SpaceManager;
+import goat.thaw.system.space.SpaceEventListener;
+import goat.thaw.system.space.SpacePresenceListener;
+import goat.thaw.system.space.SpaceBlockListener;
 import goat.thaw.system.stats.StatsCommand;
 import goat.thaw.system.stats.StatsManager;
 import goat.thaw.subsystems.hunting.TrailManager;
+import goat.thaw.subsystems.hunting.TrailRenderMode;
 import goat.thaw.subsystems.hunting.SpawnTrailStartCommand;
 import goat.thaw.subsystems.calories.CalorieManager;
 import goat.thaw.system.DailyAnnouncementManager;
 import goat.thaw.system.SidebarManager;
 import goat.thaw.system.TablistManager;
 import org.bukkit.plugin.java.JavaPlugin;
+import goat.thaw.subsystems.temperature.DiceManager;
+import goat.thaw.system.logging.DiceLogger;
+import goat.thaw.system.dev.DiceLogCommand;
+import goat.thaw.system.dev.SledManager;
+import goat.thaw.system.dev.SledCommand;
 
 public final class Thaw extends JavaPlugin {
 
@@ -29,10 +41,21 @@ public final class Thaw extends JavaPlugin {
     private CalorieManager calorieManager;
     private ActivityEnergyManager activityEnergyManager;
     private ThermalRegulator thermalRegulator;
+    private SpaceManager spaceManager;
+    private DiceManager diceManager;
+    private DiceLogger diceLogger;
+    private SledManager sledManager;
 
     @Override
     public void onEnable() {
         // getServer().getPluginManager().registerEvents(new ResourcePackListener(), this);
+
+        // Spaces: load and listeners
+        spaceManager = new SpaceManager(this);
+        spaceManager.load();
+        getServer().getPluginManager().registerEvents(new SpacePresenceListener(spaceManager), this);
+        getServer().getPluginManager().registerEvents(new SpaceEventListener(spaceManager, this), this);
+        getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
 
         // Dev commands
         if (getCommand("generatearctic") != null) {
@@ -50,6 +73,14 @@ public final class Thaw extends JavaPlugin {
         if (getCommand("teleporttopeak") != null) {
             getCommand("teleporttopeak").setExecutor(new TeleportToPeakCommand());
         }
+        if (getCommand("floodfillalgorithm") != null) {
+            getCommand("floodfillalgorithm").setExecutor(new FloodFillAlgorithmCommand(this, spaceManager));
+        }
+        if (getCommand("sled") != null) {
+            sledManager = new SledManager(this);
+            getCommand("sled").setExecutor(new SledCommand(sledManager));
+        }
+
 
         // Stats system: load definitions and persistent values
         statsManager = new StatsManager(this);
@@ -65,6 +96,7 @@ public final class Thaw extends JavaPlugin {
 
         // Trails: dev spawning + random/daybreak hooks
         trailManager = new TrailManager(this);
+        trailManager.setRenderMode(TrailRenderMode.PARTICLE);
         trailManager.start();
         if (getCommand("spawntrailstart") != null) {
             getCommand("spawntrailstart").setExecutor(new SpawnTrailStartCommand(trailManager));
@@ -85,6 +117,11 @@ public final class Thaw extends JavaPlugin {
         thermalRegulator = new ThermalRegulator(this, statsManager);
         thermalRegulator.start();
 
+        // DICE: external climate and body drift
+        diceLogger = new DiceLogger(this);
+        diceManager = new DiceManager(this, statsManager, spaceManager, diceLogger);
+        diceManager.start();
+
         // Sidebar: live environment HUD with Temperature
         sidebarManager = new SidebarManager(this, statsManager);
         sidebarManager.start();
@@ -93,11 +130,18 @@ public final class Thaw extends JavaPlugin {
         tablistManager = new TablistManager(this, statsManager, populationManager);
         tablistManager.start();
 
+        if (getCommand("externaltempdebug") != null) {
+            getCommand("externaltempdebug").setExecutor(new ExternalTempDebugCommand(diceManager));
+        }
+        if (getCommand("dicelog") != null) {
+            getCommand("dicelog").setExecutor(new DiceLogCommand(diceLogger));
+        }
         // (Trail dev command already registered above)
     }
 
     @Override
     public void onDisable() {
+        if (spaceManager != null) spaceManager.save();
         if (sidebarManager != null) sidebarManager.stop();
         if (statsManager != null) statsManager.stop();
         if (tablistManager != null) tablistManager.stop();
@@ -106,5 +150,7 @@ public final class Thaw extends JavaPlugin {
         if (calorieManager != null) calorieManager.stop();
         if (activityEnergyManager != null) activityEnergyManager.stop();
         if (thermalRegulator != null) thermalRegulator.stop();
+        if (diceManager != null) diceManager.stop();
+        if (sledManager != null) sledManager.stopAll();
     }
 }

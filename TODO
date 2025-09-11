@@ -1,0 +1,7 @@
+Fix Sky Exposure false positives in the floodfill algorithm.
+Remove entire External Temperature Framework, design a new, simple one from scratch, and implement it.
+Balance a temperature cooling system that allows the player to be in the cold for 5 minutes before dropping below 30 degrees (Hyp 1). The sun prevents the players temperature from dropping below 20 degrees.
+when the sun gets lower in the sky, or if the player breaks line of sight with the sun, the player will lose their lifeline against fatal cold. this means that nightfall, overhangs, even mountains getting in the way, are all lethal to the player.
+The player will get Hypothermia I at <30 degrees (slowness 1, mining fatigue 1) then hypothermia II at 15, then Frostbite at <0 (frostbite is infinite frost ticks, so a slow death).
+but the player cant just sit idly by, as they need to progress and explore, which takes calories, so they would need to hunt.
+we are close to a beta test

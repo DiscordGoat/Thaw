@@ -193,8 +193,10 @@ public class CalorieManager implements Listener {
         // Require enough calories to pay cost
         if (calories < HEAL_COST_CALORIES) return;
 
-        // Spend calories and heal
+        // Spend calories and heal; couple to temperature
         calInst.subtract(HEAL_COST_CALORIES);
+        goat.thaw.system.stats.StatInstance body = stats.get(p.getUniqueId(), "Temperature");
+        if (body != null && body.get() < 65.0) body.add(HEAL_COST_CALORIES * 0.5);
         double newHealth = Math.min(cap, health + HEAL_AMOUNT);
         try {
             p.setHealth(newHealth);

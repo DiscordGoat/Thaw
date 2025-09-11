@@ -82,6 +82,9 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         // 8) Bedrock band overwrite at bottom (vanilla-like)
         placeBedrock(world, data, seed, chunkX, chunkZ);
+        
+        // 9) Post-process: enforce sand rules near water and above sand
+        postProcessSandAndDirt(world, data);
 
         return data;
     }
@@ -1304,18 +1307,29 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         int h0 = surfaceApprox(world, seed, wx, wz, worldMaxY);
         if (h0 >= MOUNTAIN_Y) return 0.0;
 
-        // Sample along multiple directions with step size 2
-        final int[] dirs = {1,0, -1,0, 0,1, 0,-1, 1,1, 1,-1, -1,1, -1,-1, 2,1, 2,-1, -2,1, -2,-1, 1,2, -1,2, 1,-2, -1,-2};
+        // Isotropic radial sampling to reduce directional artifacts ("spikes")
+        // Use many evenly spaced directions with a small per-cell angular jitter.
+        final int directions = 48; // increase for smoother, at some CPU cost
+        final double step = 3.0;   // 3-block step to balance cost/accuracy
         double best = Double.POSITIVE_INFINITY;
-        int step = 2;
-        for (int i = 0; i < dirs.length; i += 2) {
-            int dx = dirs[i], dz = dirs[i + 1];
-            for (int r = step; r <= maxDist; r += step) {
-                int sx = wx + dx * r;
-                int sz = wz + dz * r;
-                int h = surfaceApprox(world, seed, sx, sz, worldMaxY);
+
+        // Angular jitter based on seed and position to break symmetry
+        double jitter = (random01(hash(seed, wx, 0x0D15A7C3L, wz, 0x5EED5EEDL)) - 0.5) * (Math.PI / directions);
+
+        for (int i = 0; i < directions; i++) {
+            double theta = (2.0 * Math.PI * i) / directions + jitter;
+            double dx = Math.cos(theta);
+            double dz = Math.sin(theta);
+            double sx = wx;
+            double sz = wz;
+            for (double r = step; r <= maxDist; r += step) {
+                sx += dx * step;
+                sz += dz * step;
+                int ix = (int) Math.floor(sx);
+                int iz = (int) Math.floor(sz);
+                int h = surfaceApprox(world, seed, ix, iz, worldMaxY);
                 if (h >= MOUNTAIN_Y) {
-                    double d = Math.hypot(sx - wx, sz - wz);
+                    double d = Math.hypot(ix - wx, iz - wz);
                     if (d < best) best = d;
                     break;
                 }
@@ -1615,6 +1629,80 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     data.setBlock(lx, y, lz, Material.SAND);
                 }
             } catch (Throwable ignore) {}
+        }
+    }
+
+    // Post-process pass:
+    //  - Convert all dirt (and grassy dirt) within 20 blocks of any water column (near sea level band) to sand
+    //  - Ensure no dirt/grass/stone sits above sand in any column within the audit range
+    private void postProcessSandAndDirt(World world, ChunkData data) {
+        final int r = 20; // horizontal radius in blocks
+        final int yMin = Math.max(world.getMinHeight(), 140);
+        final int yMax = Math.min(world.getMaxHeight() - 1, OCEAN_SEA_LEVEL + 16);
+
+        // Precompute which local columns contain water in [yMin, yMax]
+        boolean[][] hasWater = new boolean[16][16];
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                boolean found = false;
+                for (int y = yMin; y <= yMax; y++) {
+                    try {
+                        if (data.getType(lx, y, lz) == Material.WATER) { found = true; break; }
+                    } catch (Throwable ignore) {}
+                }
+                hasWater[lx][lz] = found;
+            }
+        }
+
+        // Precompute near-water mask by radius check against water columns
+        boolean[][] nearWater = new boolean[16][16];
+        int r2 = r * r;
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                boolean nw = false;
+                for (int dx = -r; dx <= r && !nw; dx++) {
+                    int x = lx + dx; if (x < 0 || x > 15) continue;
+                    int dx2 = dx * dx;
+                    for (int dz = -r; dz <= r; dz++) {
+                        int z = lz + dz; if (z < 0 || z > 15) continue;
+                        if (dx2 + dz*dz > r2) continue;
+                        if (hasWater[x][z]) { nw = true; break; }
+                    }
+                }
+                nearWater[lx][lz] = nw;
+            }
+        }
+
+        // A) Convert dirt near water to sand
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                if (!nearWater[lx][lz]) continue;
+                for (int y = yMin; y <= yMax; y++) {
+                    try {
+                        Material m = data.getType(lx, y, lz);
+                        if (m == Material.DIRT || m == Material.GRASS_BLOCK) {
+                            data.setBlock(lx, y, lz, Material.SAND);
+                        }
+                    } catch (Throwable ignore) {}
+                }
+            }
+        }
+
+        // B) Ensure nothing dirt-like or stone sits above sand within the band
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                boolean seenSand = false;
+                for (int y = yMin; y <= yMax; y++) {
+                    try {
+                        Material m = data.getType(lx, y, lz);
+                        if (m == Material.SAND) {
+                            seenSand = true;
+                        } else if (seenSand && (m == Material.DIRT || m == Material.GRASS_BLOCK || m == Material.STONE)) {
+                            data.setBlock(lx, y, lz, Material.SAND);
+                        }
+                    } catch (Throwable ignore) {}
+                }
+            }
         }
     }
 

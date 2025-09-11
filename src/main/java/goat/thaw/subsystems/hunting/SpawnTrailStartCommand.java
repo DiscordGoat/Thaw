@@ -24,9 +24,12 @@ public class SpawnTrailStartCommand implements CommandExecutor {
         Location feet = p.getLocation();
         // Snap to block below feet
         Location under = feet.clone().subtract(0, 1, 0);
-        trails.spawnTrailStart(under);
-        sender.sendMessage(ChatColor.GREEN + "Spawned trail start at your feet.");
+        var tsi = trails.spawnTrailStart(under, p.getUniqueId());
+        if (tsi == null) {
+            sender.sendMessage(ChatColor.RED + "You already have 2 active trails.");
+        } else {
+            sender.sendMessage(ChatColor.GREEN + "Spawned trail start at your feet.");
+        }
         return true;
     }
 }
-

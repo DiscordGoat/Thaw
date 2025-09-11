@@ -85,7 +85,7 @@ public class PopulationManager implements Listener {
                     int bz = (int) Math.floor(tz);
                     if (w == null) return;
                     if (w.getBlockAt(bx, w.getHighestBlockYAt(bx, bz), bz).isLiquid()) return;
-                    trails.spawnTrailStart(new org.bukkit.Location(w, bx, w.getHighestBlockYAt(bx, bz), bz));
+                    var spawned = trails.spawnTrailStart(new org.bukkit.Location(w, bx, w.getHighestBlockYAt(bx, bz), bz), p.getUniqueId());
                 } catch (Throwable ignore) {}
             });
             // Increment DayCount for online players

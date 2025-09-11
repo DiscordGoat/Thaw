@@ -131,6 +131,9 @@ public class ActivityEnergyManager implements Listener {
         StatInstance cal = stats.get(p.getUniqueId(), "Calories");
         if (cal == null) return;
         cal.subtract(amount);
+        // Calorie coupling: only warm body when below 65 F
+        StatInstance body = stats.get(p.getUniqueId(), "Temperature");
+        if (body != null && body.get() < 65.0) body.add(amount * 0.5);
     }
 
     // Per-action hooks
