@@ -58,7 +58,7 @@ commands:
     permission-message: You must be op to use this.
   sled:
     description: Dev SLED airboat
-    usage: /sled
+    usage: /sled <dogCount 1-2>
     permission: thaw.dev
     permission-message: You must be op to use this.
 permissions:

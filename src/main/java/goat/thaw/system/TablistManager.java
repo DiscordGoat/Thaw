@@ -1,6 +1,8 @@
 package goat.thaw.system;
 
 import goat.thaw.subsystems.combat.PopulationManager;
+import goat.thaw.system.effects.EffectManager;
+import goat.thaw.subsystems.oxygen.OxygenManager;
 import goat.thaw.system.stats.StatInstance;
 import goat.thaw.system.stats.StatsManager;
 import org.bukkit.Bukkit;
@@ -20,12 +22,16 @@ public class TablistManager implements Listener {
     private final JavaPlugin plugin;
     private final StatsManager stats;
     private final PopulationManager population;
+    private final EffectManager effects;
+    private final OxygenManager oxygen;
     private BukkitTask task;
 
-    public TablistManager(JavaPlugin plugin, StatsManager stats, PopulationManager population) {
+    public TablistManager(JavaPlugin plugin, StatsManager stats, PopulationManager population, EffectManager effects, OxygenManager oxygen) {
         this.plugin = plugin;
         this.stats = stats;
         this.population = population;
+        this.effects = effects;
+        this.oxygen = oxygen;
     }
 
     public void start() {
@@ -98,8 +104,13 @@ public class TablistManager implements Listener {
         String thermalLine = ChatColor.RED + "Thermal: " + tempColor + String.format(Locale.US, "%.0f%%", optimalPct * 100.0)
                 + ChatColor.GRAY + " (" + thermalWord + ")" + ChatColor.RESET;
 
-        // Effects placeholder
-        String effectsLine = ChatColor.WHITE + "Effects: " + ChatColor.GRAY + "(none)" + ChatColor.RESET;
+        // Deep Underground
+        boolean deep = oxygen != null && oxygen.isDeepUnderground(p.getUniqueId());
+        String deepLine = ChatColor.WHITE + "Deep Underground: " + (deep ? ChatColor.RED + "True" : ChatColor.GREEN + "False") + ChatColor.RESET;
+
+        // Effects
+        var labels = effects.getActiveEffectLabels(p.getUniqueId());
+        String effectsLine = ChatColor.WHITE + "Effects: " + (labels.isEmpty() ? ChatColor.GRAY + "(none)" : ChatColor.GREEN + String.join(ChatColor.WHITE + ", " + ChatColor.GREEN, labels)) + ChatColor.RESET;
 
         String worldLine = ChatColor.WHITE + "World: " + ChatColor.RED + "Monster Pop "
                 + ChatColor.WHITE + String.format(Locale.US, "%.1f", population.getMonsterPopulation());
@@ -110,7 +121,20 @@ public class TablistManager implements Listener {
         if (extInst != null) ext = extInst.get();
         String extLine = ChatColor.BLUE + "External Temp: " + ChatColor.WHITE + String.format(Locale.US, "%+.1f F", ext);
 
-        String header = ChatColor.AQUA + "=== Condition ===\n" + calLine + "\n" + oxyLine + "\n" + thermalLine + "\n" + effectsLine + "\n" + worldLine + "\n" + extLine;
+        String divider = ChatColor.DARK_GRAY + "---------------------------" + ChatColor.RESET;
+        String header = String.join("\n",
+                ChatColor.AQUA + "=== Condition ===",
+                calLine,
+                oxyLine,
+                thermalLine,
+                deepLine,
+                divider,
+                effectsLine,
+                divider,
+                worldLine,
+                divider,
+                extLine
+        );
         String footer = "";
         try {
             p.setPlayerListHeaderFooter(header, footer);

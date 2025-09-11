@@ -28,7 +28,9 @@ import goat.thaw.subsystems.temperature.DiceManager;
 import goat.thaw.system.logging.DiceLogger;
 import goat.thaw.system.dev.DiceLogCommand;
 import goat.thaw.system.dev.SledManager;
+import goat.thaw.system.effects.EffectManager;
 import goat.thaw.system.dev.SledCommand;
+import goat.thaw.subsystems.oxygen.OxygenManager;
 
 public final class Thaw extends JavaPlugin {
 
@@ -45,6 +47,8 @@ public final class Thaw extends JavaPlugin {
     private DiceManager diceManager;
     private DiceLogger diceLogger;
     private SledManager sledManager;
+    private EffectManager effectManager;
+    private OxygenManager oxygenManager;
 
     @Override
     public void onEnable() {
@@ -122,12 +126,20 @@ public final class Thaw extends JavaPlugin {
         diceManager = new DiceManager(this, statsManager, spaceManager, diceLogger);
         diceManager.start();
 
+        // Effects: circumstantial and timed (e.g., Hypoxia)
+        effectManager = new EffectManager(this, statsManager);
+        effectManager.start();
+
         // Sidebar: live environment HUD with Temperature
         sidebarManager = new SidebarManager(this, statsManager);
         sidebarManager.start();
 
+        // Oxygen: deep-underground detection, depletion and regeneration
+        oxygenManager = new OxygenManager(this, statsManager);
+        oxygenManager.start();
+
         // Tablist: condition overview segments + world pop
-        tablistManager = new TablistManager(this, statsManager, populationManager);
+        tablistManager = new TablistManager(this, statsManager, populationManager, effectManager, oxygenManager);
         tablistManager.start();
 
         if (getCommand("externaltempdebug") != null) {
@@ -152,5 +164,7 @@ public final class Thaw extends JavaPlugin {
         if (thermalRegulator != null) thermalRegulator.stop();
         if (diceManager != null) diceManager.stop();
         if (sledManager != null) sledManager.stopAll();
+        if (effectManager != null) effectManager.stop();
+        if (oxygenManager != null) oxygenManager.stop();
     }
 }

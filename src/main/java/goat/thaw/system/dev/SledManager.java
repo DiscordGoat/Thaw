@@ -14,6 +14,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerUnleashEntityEvent;
 import org.bukkit.event.entity.EntityUnleashEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.vehicle.VehicleExitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
@@ -46,6 +47,9 @@ public class SledManager implements Listener {
         java.util.List<org.bukkit.entity.Wolf> dogs = new java.util.ArrayList<>();
         ArmorStand leadHolder;
         int animTick;
+        int dogCount = 2; // 1-2
+        int descendDelayTicks; // delay before starting descent
+        boolean descentArmed;  // prevents re-arming while hovering above target
     }
 
     public SledManager(JavaPlugin plugin) {
@@ -55,7 +59,9 @@ public class SledManager implements Listener {
 
     public boolean hasSession(Player p) { return sessions.containsKey(p.getUniqueId()); }
 
-    public void startSled(Player p) {
+    public void startSled(Player p) { startSled(p, 2); }
+
+    public void startSled(Player p, int dogCount) {
         stopSled(p); // ensure clean state
         World w = p.getWorld();
         Location base = p.getLocation().clone();
@@ -75,7 +81,7 @@ public class SledManager implements Listener {
         // Spawn marker 10 blocks ahead of crosshair
         Location target = computeTarget(p, 6.0);
         ArmorStand mark = (ArmorStand) w.spawnEntity(target, EntityType.ARMOR_STAND);
-        try { mark.setVisible(true); } catch (Throwable ignore) {}
+        try { mark.setVisible(false); } catch (Throwable ignore) {}
         try { mark.setMarker(true); } catch (Throwable ignore) {}
         try { mark.setGravity(false); } catch (Throwable ignore) {}
         try { mark.setSmall(true); } catch (Throwable ignore) {}
@@ -88,11 +94,12 @@ public class SledManager implements Listener {
         s.marker = mark;
         s.heightTargetY = mark.getLocation().getY();
         s.heightLerpTicks = 1;
+        s.dogCount = Math.max(1, Math.min(2, dogCount));
         // Spawn husky team visuals anchored relative to the steering marker
         Vector initialDir = s.marker.getLocation().toVector().subtract(boatLoc.toVector());
         if (initialDir.lengthSquared() < 1e-6) initialDir = computeForwardDir(p, boatLoc);
         spawnHuskyTeam(p.getWorld(), s, boatLoc, s.marker.getLocation(), initialDir.normalize());
-        s.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> tickSession(p, s), 1L, 1L); // high freq
+        s.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> tickSession(p, s), 0L, 1L); // max freq (every tick, no initial delay)
         sessions.put(p.getUniqueId(), s);
     }
 
@@ -137,9 +144,12 @@ public class SledManager implements Listener {
         Vector dirToMarker = to.multiply(1.0 / dist);
 
         // Base speed with near-marker slowdown; stop at <=3 blocks, full at >=6 blocks
-        double baseSpeed = 1.6; // faster sled base speed
+        double baseSpeed = 0.8; // nerfed speed (50%)
         double speedScale = clamp((dist - 3.0) / 3.0, 0.0, 1.0); // 0 at 3m, 1 at 6m+
         double desiredSpeed = baseSpeed * (0.6 + 0.4 * Math.min(1.0, dist / 8.0)) * speedScale;
+        // Linear dog power scaling: 1-4 dogs -> 1x..4x speed
+        int dogCount = Math.max(1, Math.min(2, s.dogCount));
+        desiredSpeed *= dogCount;
         Vector desiredVel = dirToMarker.clone().multiply(desiredSpeed);
 
         // Predictive vertical target: aim to match hover height at the marker's column
@@ -159,14 +169,39 @@ public class SledManager implements Listener {
             s.heightTargetY = targetHoverY;
             s.heightLerpTicks = ticksToArrive;
         }
+        // Descent gating: arm once when we first see a downward target; do not re-arm until descent completes
+        boolean targetBelow = targetHoverY < boatLoc.getY() - 1e-3;
+        if (targetBelow) {
+            if (!s.descentArmed && s.descendDelayTicks <= 0) {
+                s.descendDelayTicks = 30; // ~1.5s delay
+                s.descentArmed = true;
+            }
+        } else {
+            s.descendDelayTicks = 0;
+            s.descentArmed = false;
+        }
         // Smooth vertical adjustment so we are at height by the time we arrive
         double vy = 0.0;
         double vertDelta = s.heightTargetY - boatLoc.getY();
-        if (s.heightLerpTicks > 0) {
-            vy = clamp(vertDelta / s.heightLerpTicks, -1.0, 1.0);
-            s.heightLerpTicks = Math.max(0, s.heightLerpTicks - 1);
+        boolean delayingDescent = s.descentArmed && (vertDelta < -1e-3) && s.descendDelayTicks > 0;
+        if (delayingDescent) {
+            vy = 0.0; // hold altitude
+            s.descendDelayTicks--;
+            // do not consume lerp ticks while delaying
         } else {
-            vy = clamp(vertDelta * 0.4, -1.0, 1.0);
+            if (s.heightLerpTicks > 0) {
+                vy = clamp(vertDelta / s.heightLerpTicks, -1.0, 1.0);
+                s.heightLerpTicks = Math.max(0, s.heightLerpTicks - 1);
+            } else {
+                vy = clamp(vertDelta * 0.4, -1.0, 1.0);
+            }
+        }
+        // Descend slower than ascend
+        if (vy < 0) vy *= 0.6;
+        // If we finished descending to (or past) the target, disarm so future drops can re-arm delay
+        if (s.descentArmed && boatLoc.getY() <= targetHoverY + 0.05) {
+            s.descentArmed = false;
+            s.descendDelayTicks = 0;
         }
 
         // Hybrid momentum: blend current velocity toward desired velocity (horizontal only)
@@ -228,14 +263,15 @@ public class SledManager implements Listener {
     private Location computeMarkerNext(Player p, Location currentMarker, double ahead) {
         Location desired = computeTarget(p, ahead);
         World w = desired.getWorld();
-        // Snap desired Y to be no more than 1.0 above or below current marker Y
+        // Allow step up max +1 block, step down up to -6 blocks (cliff launch)
         double curY = currentMarker.getY();
-        double maxStep = 1.0;
         double ground = surfaceTopY(w, desired.getBlockX(), desired.getBlockZ());
         double targetY = ground + 0.25; // quarter above the block
         double dy = targetY - curY;
-        if (Math.abs(dy) > maxStep + 1e-6) {
-            // Too steep: refuse movement (stop), return null to keep position
+        if (dy > 1.0 + 1e-6) {
+            return null;
+        }
+        if (dy < -6.0 - 1e-6) {
             return null;
         }
         // Accept movement with limited vertical step
@@ -365,15 +401,19 @@ public class SledManager implements Listener {
         Vector fwd = forward.clone().normalize();
         Vector right = new Vector(-fwd.getZ(), 0, fwd.getX());
         // Place dogs between boat and marker by anchoring behind the marker along -fwd
-        double[][] OFFSETS = new double[][]{
-                {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7}
-        };
+        double[][] OFFSETS;
+        if (s.dogCount <= 1) {
+            OFFSETS = new double[][]{ {-2.2, 0.0} };
+        } else {
+            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+        }
         int idx = 0;
         for (double[] off : OFFSETS) {
+            if (idx >= s.dogCount) break;
             Vector pos = fwd.clone().multiply(off[0]).add(right.clone().multiply(off[1]));
             Location base = markerLoc.clone().add(pos.getX(), -1.9, pos.getZ());
             ArmorStand plat = (ArmorStand) w.spawnEntity(base, EntityType.ARMOR_STAND);
-            try { plat.setInvisible(false); } catch (Throwable ignore) {}
+            try { plat.setInvisible(true); } catch (Throwable ignore) {}
             try { plat.setMarker(false); } catch (Throwable ignore) {}
             try { plat.setGravity(false); } catch (Throwable ignore) {}
             try { plat.setSmall(false); } catch (Throwable ignore) {}
@@ -391,12 +431,11 @@ public class SledManager implements Listener {
             s.dogs.add(dog);
             idx++;
         }
-        // Attach leads from dogs to the player for a realistic harness
+        // Attach leashes to the PLAYER so rope goes to the player's hand
         Player leashPlayer = Bukkit.getPlayer(s.playerId);
         for (org.bukkit.entity.Wolf dog : s.dogs) {
             if (leashPlayer != null && leashPlayer.isOnline()) {
                 try {
-                    // Try Paper's force parameter first
                     try { dog.getClass().getMethod("setLeashHolder", Entity.class, boolean.class).invoke(dog, leashPlayer, true); }
                     catch (NoSuchMethodException nsme) { dog.setLeashHolder(leashPlayer); }
                 } catch (Throwable ignore) {}
@@ -411,9 +450,12 @@ public class SledManager implements Listener {
         Vector fwd = markerLoc.toVector().subtract(boatLoc.toVector());
         if (fwd.lengthSquared() < 1e-6) fwd = new Vector(1, 0, 0); else fwd.normalize();
         Vector right = new Vector(-fwd.getZ(), 0, fwd.getX());
-        double[][] OFFSETS = new double[][]{
-                {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7}
-        };
+        double[][] OFFSETS;
+        if (s.dogCount <= 1) {
+            OFFSETS = new double[][]{ {-2.2, 0.0} };
+        } else {
+            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+        }
         World w = boatLoc.getWorld();
         // Move lead holder to marker plane (keeps rope length short and consistent)
         if (s.leadHolder != null && s.leadHolder.isValid()) {
@@ -444,7 +486,7 @@ public class SledManager implements Listener {
                     if (!riding) {
                         try { plat.addPassenger(dog); } catch (Throwable ignore) {}
                     }
-                    // Maintain leash to the player; force on Paper, fallback on Spigot
+                    // Maintain leash to PLAYER; if reattached, prevent dropping later via events
                     Player lp = Bukkit.getPlayer(s.playerId);
                     if (lp != null && lp.isOnline()) {
                         try {
@@ -491,7 +533,7 @@ public class SledManager implements Listener {
 
     @EventHandler
     public void onPlayerUnleash(PlayerUnleashEntityEvent e) {
-        // Prevent manual unleashing of huskies
+        // Prevent manual unleashing of huskies (server leash stays on holder ArmorStand)
         if (e.getEntity() instanceof org.bukkit.entity.Wolf) {
             if (isSledDog((org.bukkit.entity.Wolf) e.getEntity())) {
                 e.setCancelled(true);
@@ -501,25 +543,46 @@ public class SledManager implements Listener {
 
     @EventHandler
     public void onUnleash(EntityUnleashEvent e) {
-        // Reattach leash immediately if a sled dog gets unleashed (distance/unload)
+        // Reattach leash to the holder armorstand immediately if a sled dog gets unleashed
         if (e.getEntity() instanceof org.bukkit.entity.Wolf) {
             org.bukkit.entity.Wolf dog = (org.bukkit.entity.Wolf) e.getEntity();
             if (isSledDog(dog)) {
-                // find its session and reattach to that player next tick
                 Bukkit.getScheduler().runTask(plugin, () -> {
                     Session s = sessionForDog(dog);
                     if (s != null) {
-                        Player lp = Bukkit.getPlayer(s.playerId);
-                        if (lp != null && lp.isOnline()) {
-                            try {
+                        try {
+                            Player lp = Bukkit.getPlayer(s.playerId);
+                            if (lp != null && lp.isOnline()) {
                                 try { dog.getClass().getMethod("setLeashHolder", Entity.class, boolean.class).invoke(dog, lp, true); }
                                 catch (NoSuchMethodException nsme) { dog.setLeashHolder(lp); }
-                            } catch (Throwable ignore) {}
-                        }
+                            }
+                        } catch (Throwable ignore) {}
                     }
                 });
             }
         }
+    }
+
+    // Prevent dropped lead items when leash breaks by removing spawned LEAD items near sled dogs
+    @EventHandler
+    public void onItemSpawn(ItemSpawnEvent e) {
+        try {
+            if (e.getEntity() == null || e.getEntity().getItemStack() == null) return;
+            if (e.getEntity().getItemStack().getType() != org.bukkit.Material.LEAD) return;
+            // If a lead spawns within 3 blocks of any sled dog, remove it (convert break to silent)
+            org.bukkit.Location loc = e.getEntity().getLocation();
+            for (Session s : sessions.values()) {
+                if (s.dogs == null) continue;
+                for (org.bukkit.entity.Wolf d : s.dogs) {
+                    if (d != null && d.isValid() && d.getWorld().equals(loc.getWorld())) {
+                        if (d.getLocation().distanceSquared(loc) <= 9.0) { // 3 blocks
+                            e.setCancelled(true);
+                            return;
+                        }
+                    }
+                }
+            }
+        } catch (Throwable ignore) {}
     }
 
     private boolean isSledDog(org.bukkit.entity.Wolf w) {

@@ -22,10 +22,17 @@ public class SledCommand implements CommandExecutor {
             sleds.stopSled(p);
             sender.sendMessage(ChatColor.YELLOW + "SLED disabled.");
         } else {
-            sleds.startSled(p);
-            sender.sendMessage(ChatColor.GREEN + "SLED engaged. Look to steer; shift to dismount.");
+            int dogCount = 2;
+            if (args.length >= 1) {
+                try { dogCount = Integer.parseInt(args[0]); } catch (NumberFormatException ignore) {}
+            }
+            if (dogCount < 1 || dogCount > 2) {
+                sender.sendMessage(ChatColor.RED + "Usage: /" + label + " <dogCount 1-2>");
+                return true;
+            }
+            sleds.startSled(p, dogCount);
+            sender.sendMessage(ChatColor.GREEN + "SLED engaged with " + dogCount + " dog(s). Look to steer; shift to dismount.");
         }
         return true;
     }
 }
-

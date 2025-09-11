@@ -2,6 +2,7 @@ package goat.thaw.system.space;
 
 import goat.thaw.system.space.temperature.TemperatureRegistry;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockFormEvent;
@@ -69,16 +70,19 @@ public class SpaceBlockListener implements Listener {
         int maxY = w.getMaxHeight();
         int scanBudget = 200000;
         while (!stack.isEmpty() && scanBudget-- > 0) {
-            org.bukkit.block.Block b = stack.pop();
+            Block b = stack.pop();
             if (b.getWorld() != w) continue;
             int yy = b.getY();
             if (yy < minY || yy >= maxY) continue;
+
+            if (!b.getType().isAir()) continue; // <--- skip non-air first!
+
             if (isSkyExposed(w, b.getX(), yy, b.getZ())) {
                 manager.deleteSpace(current.getId());
                 p.sendMessage("Space " + current.getId() + " unsealed and removed.");
                 return;
             }
-            if (!b.getType().isAir()) continue;
+
             collected.add(new BlockPos(b.getX(), yy, b.getZ()));
             pushIfValid(w, stack, visited, b.getRelative(1, 0, 0));
             pushIfValid(w, stack, visited, b.getRelative(-1, 0, 0));
@@ -87,6 +91,7 @@ public class SpaceBlockListener implements Listener {
             pushIfValid(w, stack, visited, b.getRelative(0, 0, 1));
             pushIfValid(w, stack, visited, b.getRelative(0, 0, -1));
         }
+
         // Still sealed: overwrite geometry and temperature
         SpaceManager.InfluenceResult inf = manager.computeInfluence(w, collected);
         Space updated = new Space(current.getId(), current.getWorldName(), collected, inf.temperature, inf.totalInfluence, collected.size());
@@ -143,20 +148,13 @@ public class SpaceBlockListener implements Listener {
     }
 
     private boolean isSkyExposed(World world, int x, int y, int z) {
-        org.bukkit.block.Block block = world.getBlockAt(x, y, z);
-        boolean suspect;
-        try {
-            suspect = block.getLightFromSky() > 0;
-        } catch (Throwable t) {
-            suspect = true;
-        }
-        if (!suspect) return false;
         int top = world.getMaxHeight();
-        for (int yy = y + 1; yy < top; yy++) {
+        for (int yy = y; yy < top; yy++) {
             if (!world.getBlockAt(x, yy, z).getType().isAir()) {
-                return false;
+                return false; // blocked by ceiling
             }
         }
-        return true;
+        return true; // reached world top with no blocks
     }
+
 }
