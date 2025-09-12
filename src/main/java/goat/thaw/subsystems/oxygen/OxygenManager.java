@@ -140,8 +140,7 @@ public class OxygenManager implements Listener {
     private boolean isStoneLike(Material m) {
         return m == Material.STONE || m == Material.DEEPSLATE || m == Material.ANDESITE
                 || m == Material.DIORITE || m == Material.GRANITE || m == Material.TUFF
-                || m == Material.DEEPSLATE_TILES || m == Material.COBBLESTONE || m == Material.BLACKSTONE
-                || (m.isSolid() && m.isOccluding()); // fallback: conservative
+                || m == Material.DEEPSLATE_TILES || m == Material.COBBLESTONE || m == Material.BLACKSTONE; // fallback: conservative
     }
 
     // Flood fill matching Space system semantics (DFS-style), bounded by maxSteps.

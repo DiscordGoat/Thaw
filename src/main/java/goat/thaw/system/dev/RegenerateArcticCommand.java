@@ -1,5 +1,6 @@
 package goat.thaw.system.dev;
 
+import goat.thaw.Thaw;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -8,6 +9,7 @@ import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 
@@ -57,6 +59,11 @@ public class RegenerateArcticCommand implements CommandExecutor {
 
         player.teleport(spawn);
         player.sendMessage("§aRegenerated and warped to §f" + WORLD_NAME);
+
+// Pregenerate new Arctic region
+        Bukkit.getScheduler().runTaskLater(JavaPlugin.getPlugin(Thaw.class), () -> {
+            ((Thaw) JavaPlugin.getPlugin(Thaw.class)).pregenerateArctic(world);
+        }, 20L); // 1 second delay so world is fully loaded
         return true;
     }
 

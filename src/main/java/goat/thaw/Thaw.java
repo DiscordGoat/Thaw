@@ -3,6 +3,7 @@ package goat.thaw;
 import goat.thaw.subsystems.calories.ActivityEnergyManager;
 import goat.thaw.subsystems.combat.PopulationManager;
 import goat.thaw.subsystems.temperature.ThermalRegulator;
+import goat.thaw.system.FirstJoinListener;
 import goat.thaw.system.dev.*;
 import goat.thaw.system.space.SpaceManager;
 import goat.thaw.system.space.SpaceEventListener;
@@ -18,6 +19,7 @@ import goat.thaw.system.DailyAnnouncementManager;
 import goat.thaw.system.SidebarManager;
 import goat.thaw.system.TablistManager;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -25,6 +27,11 @@ import goat.thaw.subsystems.temperature.DiceManager;
 import goat.thaw.system.logging.DiceLogger;
 import goat.thaw.system.effects.EffectManager;
 import goat.thaw.subsystems.oxygen.OxygenManager;
+import org.bukkit.scheduler.BukkitRunnable;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
 
 public final class Thaw extends JavaPlugin {
 
@@ -56,6 +63,7 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpacePresenceListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new SpaceEventListener(spaceManager, this), this);
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
+        getServer().getPluginManager().registerEvents(new FirstJoinListener(this), this);
 
         // Schematic system
         schematicManager = new SchemManager(this);
@@ -150,7 +158,45 @@ public final class Thaw extends JavaPlugin {
         if (getCommand("dicelog") != null) {
             getCommand("dicelog").setExecutor(new DiceLogCommand(diceLogger));
         }
-        // (Trail dev command already registered above)
+
+        Bukkit.getScheduler().runTask(this, () -> {
+            World arctic = Bukkit.getWorld("Arctic");
+            if (arctic == null) {
+                Bukkit.getLogger().info("[Thaw] Creating new Arctic world...");
+                WorldCreator wc = new WorldCreator("Arctic").generator(new ArcticChunkGenerator());
+                arctic = wc.createWorld();
+
+                if (arctic != null) {
+                    pregenerateArctic(arctic);
+                }
+            } else {
+                Bukkit.getLogger().info("[Thaw] Reloading existing Arctic world...");
+                new WorldCreator("Arctic").generator(new ArcticChunkGenerator()).createWorld();
+            }
+
+            // Now safe to schedule bungalow placement too
+            Bukkit.getScheduler().runTaskTimer(this, () -> {
+                ArcticChunkGenerator gen = ArcticChunkGenerator.getInstance();
+                if (gen == null) return;
+
+                World world = Bukkit.getWorld("Arctic");
+                if (world == null) return;
+
+                List<Location> toPlace;
+                synchronized (gen.bungalowQueue) {
+                    toPlace = new ArrayList<>(gen.bungalowQueue);
+                    gen.bungalowQueue.clear();
+                }
+
+                if (!toPlace.isEmpty()) {
+                    Bukkit.getLogger().info("[Thaw] Placing " + toPlace.size() + " bungalows...");
+                }
+
+                for (Location loc : toPlace) {
+                    schematicManager.placeStructure("pacifist", loc);
+                }
+            }, 200L, 200L);
+        });
     }
 
     @Override
@@ -169,4 +215,51 @@ public final class Thaw extends JavaPlugin {
         if (effectManager != null) effectManager.stop();
         if (oxygenManager != null) oxygenManager.stop();
     }
+    public void pregenerateArctic(World world) {
+        int radius = 32; // 64x64 chunks (center ±32)
+        List<ChunkPos> chunks = new ArrayList<>();
+
+        for (int x = -radius; x <= radius; x++) {
+            for (int z = -radius; z <= radius; z++) {
+                chunks.add(new ChunkPos(x, z));
+            }
+        }
+
+        final int total = chunks.size();
+        final int[] counter = {0};
+
+        Bukkit.getLogger().info("[Thaw] Starting pregeneration of Arctic (" + total + " chunks)...");
+
+        // Process in batches (e.g., 10 per tick)
+        new BukkitRunnable() {
+            final Iterator<ChunkPos> it = chunks.iterator();
+
+            @Override
+            public void run() {
+                int perTick = 1; // tune this number
+                for (int i = 0; i < perTick && it.hasNext(); i++) {
+                    ChunkPos pos = it.next();
+                    world.getChunkAt(pos.x, pos.z); // triggers gen safely
+                    counter[0]++;
+
+                    if (counter[0] % 100 == 0 || !it.hasNext()) {
+                        Bukkit.getLogger().info("[Thaw] Pregenerated " + counter[0] + "/" + total);
+                    }
+                }
+                if (!it.hasNext()) {
+                    Bukkit.getLogger().info("[Thaw] Pregeneration complete!");
+                    cancel();
+                }
+            }
+        }.runTaskTimer(this, 1L, 1L);
+
+    }
+
+    private static class ChunkPos {
+        final int x, z;
+        ChunkPos(int x, int z) { this.x = x; this.z = z; }
+    }
+
+
+
 }
