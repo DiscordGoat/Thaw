@@ -43,7 +43,7 @@ public final class Thaw extends JavaPlugin {
     private SledManager sledManager;
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
-    private SchematicManager schematicManager;
+    private SchemManager schematicManager;
 
     @Override
     public void onEnable() {
@@ -58,7 +58,7 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
 
         // Schematic system
-        schematicManager = new SchematicManager(this);
+        schematicManager = new SchemManager(this);
         if (getCommand("testschem") != null) {
             getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
         }

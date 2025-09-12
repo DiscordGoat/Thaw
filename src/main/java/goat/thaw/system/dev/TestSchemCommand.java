@@ -16,9 +16,9 @@ import java.util.Set;
  */
 public class TestSchemCommand implements CommandExecutor {
 
-    private final SchematicManager schematicMgr;
+    private final SchemManager schematicMgr;
 
-    public TestSchemCommand(SchematicManager schematicMgr) {
+    public TestSchemCommand(SchemManager schematicMgr) {
         this.schematicMgr = schematicMgr;
     }
 
@@ -31,31 +31,20 @@ public class TestSchemCommand implements CommandExecutor {
         }
         Player player = (Player) sender;
 
-        // get the up-to-date list of names
-        Set<String> available = schematicMgr.getAvailableSchematics();
-
-        // no args → show usage + available
+        // Check for required argument
         if (args.length != 1) {
             player.sendMessage(ChatColor.YELLOW + "Usage: /" + label + " <schematicName>");
-            player.sendMessage(ChatColor.GRAY  + "Available: " + String.join(", ", available));
+            player.sendMessage(ChatColor.GRAY  + "Note: Schematics must be in the resources/schematics/ folder");
             return true;
         }
 
         String name = args[0].toLowerCase(Locale.ROOT);
-        if (!available.contains(name)) {
-            player.sendMessage(ChatColor.RED   + "Unknown schematic: '" + name + "'.");
-            player.sendMessage(ChatColor.GRAY  + "Available: " + String.join(", ", available));
-            return true;
-        }
-
-        // paste it
-        Location loc = player.getLocation();
-        boolean success = schematicMgr.spawnSchematic(name, loc);
-
-        if (success) {
+        try {
+            // Try to paste the schematic
+            schematicMgr.placeStructure(name, player.getLocation());
             player.sendMessage(ChatColor.GREEN + "Pasted schematic '" + name + "' at your location.");
-        } else {
-            player.sendMessage(ChatColor.RED   + "Failed to paste schematic '" + name + "'. Check console.");
+        } catch (Exception e) {
+            player.sendMessage(ChatColor.RED + "Failed to paste schematic '" + name + "'. Check console for details.");
         }
 
         return true;
