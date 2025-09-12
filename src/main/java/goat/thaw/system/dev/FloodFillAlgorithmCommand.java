@@ -56,6 +56,11 @@ public class FloodFillAlgorithmCommand implements CommandExecutor {
             return true;
         }
         Player player = (Player) sender;
+        World.Environment env = player.getWorld().getEnvironment();
+        if (env != World.Environment.NORMAL && env != World.Environment.THE_END) {
+            player.sendMessage("Space mapping is only supported in the Overworld and the End.");
+            return true;
+        }
 
         Block start = player.getLocation().getBlock().getRelative(0, 1, 0);
         FillSession session = new FillSession(player);

@@ -122,6 +122,11 @@ public class SpaceManager {
         }
 
         World world = player.getWorld();
+        World.Environment env = world.getEnvironment();
+        if (env != World.Environment.NORMAL && env != World.Environment.THE_END) {
+            player.sendMessage("Spaces cannot be created in this dimension.");
+            return Optional.empty();
+        }
         final Deque<Block> stack = new ArrayDeque<>();
         final Set<String> visited = new HashSet<>();
         final Set<BlockPos> collected = new HashSet<>();
@@ -202,6 +207,11 @@ public class SpaceManager {
         }
 
         World world = seed.getWorld();
+        World.Environment env = world.getEnvironment();
+        if (env != World.Environment.NORMAL && env != World.Environment.THE_END) {
+            player.sendMessage("Spaces cannot be created in this dimension.");
+            return Optional.empty();
+        }
         final Deque<Block> stack = new ArrayDeque<>();
         final Set<String> visited = new HashSet<>();
         final Set<BlockPos> collected = new HashSet<>();
