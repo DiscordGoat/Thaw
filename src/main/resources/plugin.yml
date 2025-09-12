@@ -61,6 +61,11 @@ commands:
     usage: /dicelog
     permission: thaw.dev
     permission-message: You must be op to use this.
+  toggleeffects:
+    description: Toggle custom effects on or off
+    usage: /toggleeffects
+    permission: thaw.dev
+    permission-message: You must be op to use this.
   sled:
     description: Dev SLED airboat
     usage: /sled <dogCount 1-2>

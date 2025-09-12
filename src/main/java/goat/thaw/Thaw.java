@@ -31,6 +31,7 @@ import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
+import goat.thaw.system.dev.ToggleEffectsCommand;
 
 public final class Thaw extends JavaPlugin {
 
@@ -175,6 +176,9 @@ public final class Thaw extends JavaPlugin {
         }
         if (getCommand("dicelog") != null) {
             getCommand("dicelog").setExecutor(new DiceLogCommand(diceLogger));
+        }
+        if (getCommand("toggleeffects") != null) {
+            getCommand("toggleeffects").setExecutor(new ToggleEffectsCommand(effectManager));
         }
 
         Bukkit.getScheduler().runTask(this, () -> {
