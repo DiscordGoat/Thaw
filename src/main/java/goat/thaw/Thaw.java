@@ -3,13 +3,7 @@ package goat.thaw;
 import goat.thaw.subsystems.calories.ActivityEnergyManager;
 import goat.thaw.subsystems.combat.PopulationManager;
 import goat.thaw.subsystems.temperature.ThermalRegulator;
-import goat.thaw.system.dev.DecomissionCommand;
-import goat.thaw.system.dev.GenerateArcticCommand;
-import goat.thaw.system.dev.RegenerateArcticCommand;
-import goat.thaw.system.dev.WarpToCommand;
-import goat.thaw.system.dev.TeleportToPeakCommand;
-import goat.thaw.system.dev.FloodFillAlgorithmCommand;
-import goat.thaw.system.dev.ExternalTempDebugCommand;
+import goat.thaw.system.dev.*;
 import goat.thaw.system.space.SpaceManager;
 import goat.thaw.system.space.SpaceEventListener;
 import goat.thaw.system.space.SpacePresenceListener;
@@ -23,13 +17,13 @@ import goat.thaw.subsystems.calories.CalorieManager;
 import goat.thaw.system.DailyAnnouncementManager;
 import goat.thaw.system.SidebarManager;
 import goat.thaw.system.TablistManager;
+import org.bukkit.Bukkit;
+import org.bukkit.World;
+import org.bukkit.WorldCreator;
 import org.bukkit.plugin.java.JavaPlugin;
 import goat.thaw.subsystems.temperature.DiceManager;
 import goat.thaw.system.logging.DiceLogger;
-import goat.thaw.system.dev.DiceLogCommand;
-import goat.thaw.system.dev.SledManager;
 import goat.thaw.system.effects.EffectManager;
-import goat.thaw.system.dev.SledCommand;
 import goat.thaw.subsystems.oxygen.OxygenManager;
 
 public final class Thaw extends JavaPlugin {
@@ -49,9 +43,11 @@ public final class Thaw extends JavaPlugin {
     private SledManager sledManager;
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
+    private SchematicManager schematicManager;
 
     @Override
     public void onEnable() {
+
         // getServer().getPluginManager().registerEvents(new ResourcePackListener(), this);
 
         // Spaces: load and listeners
@@ -60,6 +56,12 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpacePresenceListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new SpaceEventListener(spaceManager, this), this);
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
+
+        // Schematic system
+        schematicManager = new SchematicManager(this);
+        if (getCommand("testschem") != null) {
+            getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
+        }
 
         // Dev commands
         if (getCommand("generatearctic") != null) {

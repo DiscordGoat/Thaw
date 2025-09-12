@@ -214,7 +214,7 @@ public class SpaceManager {
 
         Bukkit.getScheduler().runTaskTimer(plugin, task -> {
             int placed = 0;
-            int scanBudget = 4096;
+            int scanBudget = 40960;
             while (placed < quota && scanBudget-- > 0) {
                 if (stack.isEmpty()) {
                     task.cancel();
@@ -233,11 +233,15 @@ public class SpaceManager {
                 if (y < minY || y >= maxY) continue;
 
                 int highest = world.getHighestBlockYAt(b.getX(), b.getZ());
-                if (highest <= y) {
+// Only unsealed if the air block is ABOVE the highest solid, not equal
+                if (y > highest) {
+                    Bukkit.getLogger().info("[SpaceDebug] → Marked unsealed because y > highest");
                     task.cancel();
                     if (callback != null) callback.onUnsealed();
                     return;
                 }
+
+
 
                 if (!b.getType().isAir()) continue;
 

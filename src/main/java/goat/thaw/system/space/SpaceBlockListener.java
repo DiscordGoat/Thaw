@@ -1,6 +1,7 @@
 package goat.thaw.system.space;
 
 import goat.thaw.system.space.temperature.TemperatureRegistry;
+import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.event.EventHandler;
@@ -29,25 +30,32 @@ public class SpaceBlockListener implements Listener {
         int x = p.getLocation().getBlockX();
         int y = p.getLocation().getBlockY() + 1;
         int z = p.getLocation().getBlockZ();
+
+        Bukkit.getLogger().info("[SpaceDebug] Block placed by " + p.getName() + " at " + x + "," + y + "," + z);
+
         Optional<Space> opt = manager.findSpaceAt(w, x, y, z);
         if (!opt.isPresent()) {
-            // Not in a space: if placing a heat source, try to create a new space near block
+            Bukkit.getLogger().info("[SpaceDebug] No existing space at this location.");
             org.bukkit.block.Block placed = e.getBlockPlaced();
             double influence = TemperatureRegistry.influence(placed);
+            Bukkit.getLogger().info("[SpaceDebug] Influence of placed block: " + influence);
             if (influence > 0.0) {
                 long now = placed.getWorld().getFullTime();
                 long last = autoCreateCooldown.getOrDefault(p.getUniqueId(), 0L);
                 if (now - last >= AUTO_CREATE_COOLDOWN_TICKS) {
                     org.bukkit.block.Block seed = findNearestAir(placed, 5);
+                    Bukkit.getLogger().info("[SpaceDebug] Nearest air seed: " + (seed == null ? "null" : seed.getX()+","+seed.getY()+","+seed.getZ()));
                     if (seed != null) {
                         autoCreateCooldown.put(p.getUniqueId(), now);
                         manager.createFromFloodFillAt(p, seed, 32, new SpaceManager.FloodFillCallback() {
                             @Override public void onComplete(Space space) {
+                                Bukkit.getLogger().info("[SpaceDebug] New space created: " + space.getAirBlocks() + " air blocks");
                                 p.sendMessage("New space created: air=" + space.getAirBlocks()
                                         + ", influence=" + String.format("%.2f", space.getTotalInfluence())
                                         + ", temp=" + String.format("%.1fF", space.getTemperature()));
                             }
                             @Override public void onUnsealed() {
+                                Bukkit.getLogger().info("[SpaceDebug] Space creation failed due to sky exposure.");
                                 p.sendMessage("Could not create space: not sealed (sky exposure).");
                             }
                         });
@@ -57,33 +65,38 @@ public class SpaceBlockListener implements Listener {
             return;
         }
 
-        // Reconfirm sealed by recalculating from player's feet+1 (DFS). If unsealed, delete. If sealed, overwrite (shape may change)
         Space current = opt.get();
-        // Can't easily call private methods; inline simple recompute here
-        // DFS recalc (sealed check)
+        Bukkit.getLogger().info("[SpaceDebug] Found existing space ID=" + current.getId());
+
         java.util.ArrayDeque<org.bukkit.block.Block> stack = new java.util.ArrayDeque<>();
         java.util.HashSet<String> visited = new java.util.HashSet<>();
         java.util.HashSet<BlockPos> collected = new java.util.HashSet<>();
         org.bukkit.block.Block seed = p.getLocation().getBlock().getRelative(0, 1, 0);
+        Bukkit.getLogger().info("[SpaceDebug] DFS seed = " + seed.getX() + "," + seed.getY() + "," + seed.getZ());
         pushIfValid(w, stack, visited, seed);
+
         int minY = w.getMinHeight();
         int maxY = w.getMaxHeight();
         int scanBudget = 200000;
+
         while (!stack.isEmpty() && scanBudget-- > 0) {
-            Block b = stack.pop();
+            org.bukkit.block.Block b = stack.pop();
+            int bx = b.getX(), by = b.getY(), bz = b.getZ();
+            Bukkit.getLogger().info("[SpaceDebug] Visiting " + bx + "," + by + "," + bz + " type=" + b.getType());
+
             if (b.getWorld() != w) continue;
-            int yy = b.getY();
-            if (yy < minY || yy >= maxY) continue;
+            if (by < minY || by >= maxY) continue;
 
-            if (!b.getType().isAir()) continue; // <--- skip non-air first!
+            if (!b.getType().isAir()) continue; // skip non-air first!
 
-            if (isSkyExposed(w, b.getX(), yy, b.getZ())) {
+            if (isSkyExposed(w, bx, by, bz)) {
+                Bukkit.getLogger().info("[SpaceDebug] Sky exposure found at " + bx + "," + by + "," + bz);
                 manager.deleteSpace(current.getId());
                 p.sendMessage("Space " + current.getId() + " unsealed and removed.");
                 return;
             }
 
-            collected.add(new BlockPos(b.getX(), yy, b.getZ()));
+            collected.add(new BlockPos(bx, by, bz));
             pushIfValid(w, stack, visited, b.getRelative(1, 0, 0));
             pushIfValid(w, stack, visited, b.getRelative(-1, 0, 0));
             pushIfValid(w, stack, visited, b.getRelative(0, 1, 0));
@@ -92,7 +105,7 @@ public class SpaceBlockListener implements Listener {
             pushIfValid(w, stack, visited, b.getRelative(0, 0, -1));
         }
 
-        // Still sealed: overwrite geometry and temperature
+        Bukkit.getLogger().info("[SpaceDebug] DFS complete. Collected air=" + collected.size());
         SpaceManager.InfluenceResult inf = manager.computeInfluence(w, collected);
         Space updated = new Space(current.getId(), current.getWorldName(), collected, inf.temperature, inf.totalInfluence, collected.size());
         manager.overwriteSpace(updated);
@@ -144,17 +157,24 @@ public class SpaceBlockListener implements Listener {
         int y = n.getY();
         if (y < world.getMinHeight() || y >= world.getMaxHeight()) return;
         String key = world.getName() + "|" + n.getX() + "," + y + "," + n.getZ();
-        if (visited.add(key)) stack.push(n);
+        if (visited.add(key)) {
+            stack.push(n);
+            Bukkit.getLogger().info("[SpaceDebug] Pushed neighbor " + n.getX() + "," + y + "," + n.getZ());
+        }
     }
 
     private boolean isSkyExposed(World world, int x, int y, int z) {
+        Bukkit.getLogger().info("[SpaceDebug] isSkyExposed check at " + x + "," + y + "," + z);
         int top = world.getMaxHeight();
-        for (int yy = y; yy < top; yy++) {
+        for (int yy = y + 1; yy < top; yy++) {
+            String type = world.getBlockAt(x, yy, z).getType().toString();
+            Bukkit.getLogger().info("[SpaceDebug]   Scan at Y=" + yy + " type=" + type);
             if (!world.getBlockAt(x, yy, z).getType().isAir()) {
-                return false; // blocked by ceiling
+                Bukkit.getLogger().info("[SpaceDebug]   Blocked at Y=" + yy);
+                return false;
             }
         }
-        return true; // reached world top with no blocks
+        Bukkit.getLogger().info("[SpaceDebug]   No blockers, open to sky!");
+        return true;
     }
-
 }

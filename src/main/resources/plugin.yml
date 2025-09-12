@@ -46,6 +46,11 @@ commands:
     usage: /floodfillalgorithm [rate]
     permission: thaw.dev
     permission-message: You must be op to use this.
+  testschem:
+    description: Paste a schematic at your location
+    usage: /testschem <schematicName>
+    permission: thaw.dev
+    permission-message: You must be op to use this.
   externaltempdebug:
     description: Toggle external temperature drift debug actionbar
     usage: /externaltempdebug

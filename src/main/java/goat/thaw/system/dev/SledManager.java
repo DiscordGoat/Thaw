@@ -72,6 +72,7 @@ public class SledManager implements Listener {
         Location boatLoc = new Location(w, bx + 0.5, by + clearance, bz + 0.5, base.getYaw(), base.getPitch());
         // Spawn a boat and mount player
         Boat boat = (Boat) w.spawnEntity(boatLoc, EntityType.BOAT);
+        boat.setBoatType(Boat.Type.BAMBOO);
         try { boat.setGravity(false); } catch (Throwable ignore) {}
         try { boat.setInvulnerable(true); } catch (Throwable ignore) {}
         try { boat.setPersistent(false); } catch (Throwable ignore) {}
@@ -162,6 +163,17 @@ public class SledManager implements Listener {
         int mz = s.marker.getLocation().getBlockZ();
         levelThickSnowArea(bw, mx, mz, 1);
         double targetHoverY = hoverYAt(bw, mx, mz);
+        // Step-up/down limits for sled (just like marker)
+        double curY = boatLoc.getY();
+        double stepDelta = targetHoverY - curY;
+
+// allow max +1 up, max -6 down
+        if (stepDelta > 1.0) {
+            targetHoverY = curY + 1.0; // climb only 1 block, cap
+        } else if (stepDelta < -6.0) {
+            targetHoverY = curY - 6.0; // fall only 6 blocks, cap
+        }
+
         // Compute ticks to arrival based on current desired speed; clamp to a reasonable window
         int ticksToArrive = Math.max(3, Math.min(12, (int) Math.ceil(dist / Math.max(0.2, desiredSpeed + 1e-3))))
                 + 1; // small guard
@@ -250,12 +262,10 @@ public class SledManager implements Listener {
         double tz = eye.getZ() + dir.getZ() * ahead;
         int bx = (int) Math.floor(tx);
         int bz = (int) Math.floor(tz);
-        // Level thick layered snow around target to avoid marker getting stuck
-        levelThickSnowArea(w, bx, bz, 1);
         double ground = surfaceTopY(w, bx, bz);
-        // Marker stays a quarter block above the computed surface top for clearance
         double clampedY = ground + 0.25;
-        return new Location(w, bx + 0.5, clampedY, bz + 0.5);
+        return new Location(w, tx, clampedY, tz);
+
     }
 
     // Compute the next marker position respecting the 1-block vertical change limit. If the desired move
@@ -286,6 +296,11 @@ public class SledManager implements Listener {
             // Base block at yBase
             Block base = w.getBlockAt(x, yBase, z);
             Material m = base.getType();
+            if (m == Material.WATER || m == Material.KELP || m == Material.KELP_PLANT ||
+                    m == Material.SEAGRASS || m == Material.TALL_SEAGRASS || m == Material.BUBBLE_COLUMN ||
+                    m == Material.LAVA) {
+                return Double.NEGATIVE_INFINITY; // mark as invalid
+            }
             double baseTop;
             if (m.name().endsWith("_CARPET")) {
                 baseTop = yBase + (1.0 / 16.0);
