@@ -43,7 +43,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int MOUNTAIN_SEARCH_RADIUS = 224; // how far to look for mountains when computing distance
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
 
-    // Distance field configuration
+    private static final int D_CAP = OCEAN_FROM_MOUNTAIN_DIST + OCEAN_COAST_WIDTH + SHORE_JITTER_AMPLITUDE + 8;
+
     // Distance field configuration
     private static final int BASE_HALO = 64;
     // halo should at least cover the shoreline distance
@@ -56,10 +57,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int CHAMFER_DIAGONAL = 7;    // cost for diagonals
     private static final int CHAMFER_INF = Integer.MAX_VALUE / 4;
 
-    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN =
-            ThreadLocal.withInitial(() -> new boolean[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
-    private static final ThreadLocal<int[][]> TL_DIST =
-            ThreadLocal.withInitial(() -> new int[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
+    private static final int MAX_COARSE = ((16 + 2 * MAX_HALO) >> 1) + 1;
+    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN_C =
+            ThreadLocal.withInitial(() -> new boolean[MAX_COARSE][MAX_COARSE]);
+    private static final ThreadLocal<int[][]> TL_DIST_C =
+            ThreadLocal.withInitial(() -> new int[MAX_COARSE][MAX_COARSE]);
 
     // --- Bungalows & reserved flats ---
     private static final int MIN_BUNGALOW_DIST = 100;           // already there
@@ -1470,82 +1472,151 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         return clamp01((sum * 0.5) + 0.5);
     }
 
-    // Compute distance in blocks to the nearest mountain using a 2-pass chamfer transform
+    // Compute distance in blocks to the nearest mountain using a capped bucketed BFS on a coarse grid
     private double[][] computeMountainDistances(World world, long seed, double[][] surf, int chunkBaseX, int chunkBaseZ, int worldMaxY, int maxDist) {
-        int halo = Math.min(MAX_HALO, maxDist);
+        int halo = Math.min(Math.min(MAX_HALO, D_CAP), maxDist);
         int size = 16 + halo * 2;
-        int off = halo;
-        boolean[][] mountain = TL_MOUNTAIN.get();
-        int[][] dist = TL_DIST.get();
+        int sizeC = size >> 1;
+        int originX = chunkBaseX - halo;
+        int originZ = chunkBaseZ - halo;
 
-        for (int x = 0; x < size; x++) {
-            java.util.Arrays.fill(mountain[x], 0, size, false);
-            java.util.Arrays.fill(dist[x], 0, size, CHAMFER_INF);
+        int axisW = CHAMFER_AXIS * 2;
+        int diagW = CHAMFER_DIAGONAL * 2;
+        int capV = D_CAP * axisW;
+
+        boolean[][] mountain = TL_MOUNTAIN_C.get();
+        int[][] dist = TL_DIST_C.get();
+        for (int x = 0; x <= sizeC; x++) {
+            java.util.Arrays.fill(mountain[x], 0, sizeC + 1, false);
+            java.util.Arrays.fill(dist[x], 0, sizeC + 1, capV + 1);
         }
 
         boolean any = false;
-        for (int gx = -halo; gx < 16 + halo; gx++) {
-            for (int gz = -halo; gz < 16 + halo; gz++) {
-                double h;
-                if (gx >= 0 && gx < 16 && gz >= 0 && gz < 16) {
-                    h = surf[gx][gz];
-                } else {
-                    int wx = chunkBaseX + gx;
-                    int wz = chunkBaseZ + gz;
-                    h = surfaceApprox(world, seed, wx, wz, worldMaxY);
+
+        // mark mountains inside current chunk
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                if (surf[lx][lz] >= MOUNTAIN_Y) {
+                    int gx = (lx + halo) >> 1;
+                    int gz = (lz + halo) >> 1;
+                    if (!mountain[gx][gz]) {
+                        mountain[gx][gz] = true;
+                        dist[gx][gz] = 0;
+                        any = true;
+                    }
                 }
-                if (h >= MOUNTAIN_Y) {
-                    mountain[gx + off][gz + off] = true;
-                    dist[gx + off][gz + off] = 0;
-                    any = true;
+            }
+        }
+
+        // peak-based approximation for off-chunk mountains
+        int chunkX = chunkBaseX >> 4;
+        int chunkZ = chunkBaseZ >> 4;
+        int rChunks = (halo + PEAK_INFLUENCE + 15) >> 4;
+        for (int cx = chunkX - rChunks; cx <= chunkX + rChunks; cx++) {
+            for (int cz = chunkZ - rChunks; cz <= chunkZ + rChunks; cz++) {
+                if (!hasPeak(seed, cx, cz)) continue;
+                int[] p = peakParams(seed, cx, cz);
+                int px = p[0];
+                int pz = p[1];
+                int py = p[2];
+                int rad = 28 + (py - MOUNTAIN_Y) * 6 / 10;
+                if (rad < 24) rad = 24;
+                if (rad > PEAK_INFLUENCE) rad = PEAK_INFLUENCE;
+                int minX = Math.max(px - rad, originX);
+                int maxX = Math.min(px + rad, originX + size - 1);
+                int minZ = Math.max(pz - rad, originZ);
+                int maxZ = Math.min(pz + rad, originZ + size - 1);
+                if (minX > maxX || minZ > maxZ) continue;
+                int gMinX = (minX - originX) >> 1;
+                int gMaxX = (maxX - originX) >> 1;
+                int gMinZ = (minZ - originZ) >> 1;
+                int gMaxZ = (maxZ - originZ) >> 1;
+                int rad2 = rad * rad;
+                for (int gx = gMinX; gx <= gMaxX && gx <= sizeC; gx++) {
+                    int wx = originX + gx * 2 + 1;
+                    int dx = wx - px;
+                    int dx2 = dx * dx;
+                    for (int gz = gMinZ; gz <= gMaxZ && gz <= sizeC; gz++) {
+                        int wz = originZ + gz * 2 + 1;
+                        int dz = wz - pz;
+                        if (dx2 + dz * dz <= rad2) {
+                            if (!mountain[gx][gz]) {
+                                mountain[gx][gz] = true;
+                                dist[gx][gz] = 0;
+                                any = true;
+                            }
+                        }
+                    }
                 }
             }
         }
 
         double[][] result = new double[16][16];
         if (!any) {
-            for (int lx = 0; lx < 16; lx++) java.util.Arrays.fill(result[lx], Double.POSITIVE_INFINITY);
+            for (int lx = 0; lx < 16; lx++) {
+                java.util.Arrays.fill(result[lx], Double.POSITIVE_INFINITY);
+            }
             return result;
         }
 
-        // Forward pass
-        for (int x = 0; x < size; x++) {
-            for (int z = 0; z < size; z++) {
-                int v = dist[x][z];
-                if (v == 0) continue;
-                if (x > 0) v = Math.min(v, dist[x - 1][z] + CHAMFER_AXIS);
-                if (z > 0) v = Math.min(v, dist[x][z - 1] + CHAMFER_AXIS);
-                if (x > 0 && z > 0) v = Math.min(v, dist[x - 1][z - 1] + CHAMFER_DIAGONAL);
-                if (x < size - 1 && z > 0) v = Math.min(v, dist[x + 1][z - 1] + CHAMFER_DIAGONAL);
-                dist[x][z] = v;
+        @SuppressWarnings("unchecked")
+        java.util.ArrayDeque<Integer>[] buckets = new java.util.ArrayDeque[capV + 1];
+        for (int i = 0; i <= capV; i++) {
+            buckets[i] = new java.util.ArrayDeque<>();
+        }
+
+        for (int x = 0; x <= sizeC; x++) {
+            for (int z = 0; z <= sizeC; z++) {
+                if (mountain[x][z]) buckets[0].add((x << 16) | z);
             }
         }
 
-        // Backward pass
-        for (int x = size - 1; x >= 0; x--) {
-            for (int z = size - 1; z >= 0; z--) {
-                int v = dist[x][z];
-                if (x < size - 1) v = Math.min(v, dist[x + 1][z] + CHAMFER_AXIS);
-                if (z < size - 1) v = Math.min(v, dist[x][z + 1] + CHAMFER_AXIS);
-                if (x < size - 1 && z < size - 1) v = Math.min(v, dist[x + 1][z + 1] + CHAMFER_DIAGONAL);
-                if (x > 0 && z < size - 1) v = Math.min(v, dist[x - 1][z + 1] + CHAMFER_DIAGONAL);
-                dist[x][z] = v;
+        for (int cur = 0; cur <= capV; cur++) {
+            java.util.ArrayDeque<Integer> q = buckets[cur];
+            while (!q.isEmpty()) {
+                int idx = q.pollFirst();
+                int x = idx >>> 16;
+                int z = idx & 0xFFFF;
+                if (dist[x][z] != cur) continue;
+                if (x > 0) relax(dist, buckets, x - 1, z, cur, axisW, capV);
+                if (x < sizeC) relax(dist, buckets, x + 1, z, cur, axisW, capV);
+                if (z > 0) relax(dist, buckets, x, z - 1, cur, axisW, capV);
+                if (z < sizeC) relax(dist, buckets, x, z + 1, cur, axisW, capV);
+                if (x > 0 && z > 0) relax(dist, buckets, x - 1, z - 1, cur, diagW, capV);
+                if (x > 0 && z < sizeC) relax(dist, buckets, x - 1, z + 1, cur, diagW, capV);
+                if (x < sizeC && z > 0) relax(dist, buckets, x + 1, z - 1, cur, diagW, capV);
+                if (x < sizeC && z < sizeC) relax(dist, buckets, x + 1, z + 1, cur, diagW, capV);
             }
         }
 
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int v = dist[lx + off][lz + off];
-                double d;
-                if (v >= CHAMFER_INF) {
-                    d = maxDist;
-                } else {
-                    d = Math.min(maxDist, v / (double) CHAMFER_AXIS);
-                }
+                int gx = lx + halo;
+                int gz = lz + halo;
+                int x0 = Math.min(gx >> 1, sizeC - 1);
+                int z0 = Math.min(gz >> 1, sizeC - 1);
+                double tx = (gx & 1) * 0.5;
+                double tz = (gz & 1) * 0.5;
+                double v00 = dist[x0][z0];
+                double v10 = dist[x0 + 1][z0];
+                double v01 = dist[x0][z0 + 1];
+                double v11 = dist[x0 + 1][z0 + 1];
+                double vx0 = v00 + (v10 - v00) * tx;
+                double vx1 = v01 + (v11 - v01) * tx;
+                double v = vx0 + (vx1 - vx0) * tz;
+                double d = (v > capV) ? maxDist : Math.min(maxDist, v / (double) axisW);
                 result[lx][lz] = d;
             }
         }
         return result;
+    }
+
+    private static void relax(int[][] dist, java.util.ArrayDeque<Integer>[] buckets, int x, int z, int cur, int w, int capV) {
+        int nd = cur + w;
+        if (nd <= capV && nd < dist[x][z]) {
+            dist[x][z] = nd;
+            buckets[nd].add((x << 16) | z);
+        }
     }
 
     // Recomputes the same surface height logic used to fill surf[][] (approximate, fast)
