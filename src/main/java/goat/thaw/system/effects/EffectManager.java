@@ -132,6 +132,8 @@ public class EffectManager implements Listener {
 
             // Circumstantial: Hypoxia based on Oxygen
             evaluateHypoxia(p);
+            // Circumstantial: Hypothermia/Frostbite based on Temperature
+            evaluateHypothermia(p);
 
             // Timed effects countdown
             Map<EffectId, ActiveEffect> map = active.get(id);
@@ -178,6 +180,25 @@ public class EffectManager implements Listener {
         setCircumstantial(p, EffectId.HYPOXIA, desiredLevel);
     }
 
+    private void evaluateHypothermia(Player p) {
+        StatInstance temp = statsManager.get(p.getUniqueId(), "Temperature");
+        if (temp == null) return;
+        double t = temp.get();
+        if (t <= 0.0) {
+            setCircumstantial(p, EffectId.FROSTBITE, 1);
+            setCircumstantial(p, EffectId.HYPOTHERMIA, 0);
+        } else if (t < 15.0) {
+            setCircumstantial(p, EffectId.FROSTBITE, 0);
+            setCircumstantial(p, EffectId.HYPOTHERMIA, 2);
+        } else if (t < 30.0) {
+            setCircumstantial(p, EffectId.FROSTBITE, 0);
+            setCircumstantial(p, EffectId.HYPOTHERMIA, 1);
+        } else {
+            setCircumstantial(p, EffectId.FROSTBITE, 0);
+            setCircumstantial(p, EffectId.HYPOTHERMIA, 0);
+        }
+    }
+
     private void setCircumstantial(Player p, EffectId id, int level) {
         Map<EffectId, ActiveEffect> map = active.computeIfAbsent(p.getUniqueId(), k -> new EnumMap<>(EffectId.class));
         ActiveEffect current = map.get(id);
@@ -201,12 +222,16 @@ public class EffectManager implements Listener {
     private void applyEffectPotions(Player p, EffectId id, int level) {
         switch (id) {
             case HYPOXIA -> applyHypoxiaPotions(p, level);
+            case HYPOTHERMIA -> applyHypothermiaPotions(p, level);
+            case FROSTBITE -> applyFrostbitePotions(p, level);
         }
     }
 
     private void clearEffectPotions(Player p, EffectId id, int lastLevel) {
         switch (id) {
             case HYPOXIA -> clearHypoxiaPotions(p);
+            case HYPOTHERMIA -> clearHypothermiaPotions(p);
+            case FROSTBITE -> clearFrostbitePotions(p);
         }
     }
 
@@ -247,6 +272,57 @@ public class EffectManager implements Listener {
         p.removePotionEffect(PotionEffectType.DARKNESS);
     }
 
+    // Hypothermia mapping:
+    // I: Slowness I + Weakness I
+    // II: Slowness II + Weakness II + Mining Fatigue II
+    private void applyHypothermiaPotions(Player p, int level) {
+        int durationTicks = 40;
+        boolean ambient = true;
+        boolean particles = false;
+        boolean icon = false;
+
+        clearHypothermiaPotions(p);
+
+        if (level >= 1) {
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, durationTicks, 0, ambient, particles, icon));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, durationTicks, 0, ambient, particles, icon));
+        }
+        if (level >= 2) {
+            p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, durationTicks, 1, ambient, particles, icon));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, durationTicks, 1, ambient, particles, icon));
+            p.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, durationTicks, 1, ambient, particles, icon));
+        }
+    }
+
+    private void clearHypothermiaPotions(Player p) {
+        p.removePotionEffect(PotionEffectType.SLOWNESS);
+        p.removePotionEffect(PotionEffectType.WEAKNESS);
+        p.removePotionEffect(PotionEffectType.MINING_FATIGUE);
+    }
+
+    // Frostbite mapping:
+    // Slowness III + Weakness V + Mining Fatigue II
+    private void applyFrostbitePotions(Player p, int level) {
+        if (level <= 0) { clearFrostbitePotions(p); return; }
+        int durationTicks = 40;
+        boolean ambient = true;
+        boolean particles = false;
+        boolean icon = false;
+
+        clearFrostbitePotions(p);
+
+        p.addPotionEffect(new PotionEffect(PotionEffectType.SLOWNESS, durationTicks, 2, ambient, particles, icon));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.WEAKNESS, durationTicks, 4, ambient, particles, icon));
+        p.addPotionEffect(new PotionEffect(PotionEffectType.MINING_FATIGUE, durationTicks, 1, ambient, particles, icon));
+        p.setFreezeTicks(200);
+    }
+
+    private void clearFrostbitePotions(Player p) {
+        p.removePotionEffect(PotionEffectType.SLOWNESS);
+        p.removePotionEffect(PotionEffectType.WEAKNESS);
+        p.removePotionEffect(PotionEffectType.MINING_FATIGUE);
+    }
+
     // Presentation helpers
     public java.util.List<String> getActiveEffectLabels(UUID uuid) {
         Map<EffectId, ActiveEffect> map = active.get(uuid);
@@ -269,6 +345,8 @@ public class EffectManager implements Listener {
     private String displayName(EffectId id) {
         return switch (id) {
             case HYPOXIA -> "Hypoxia";
+            case HYPOTHERMIA -> "Hypothermia";
+            case FROSTBITE -> "Frostbite";
         };
     }
 
