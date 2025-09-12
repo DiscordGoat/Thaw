@@ -45,6 +45,16 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int OCEAN_COAST_WIDTH = 56; // wider smoothing band for coastline blend
     private static final int MOUNTAIN_SEARCH_RADIUS = 224; // how far to look for mountains when computing distance
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
+
+    // Distance field configuration
+    private static final int MOUNTAIN_DIST_HALO = 64; // extra cells around chunk for distance field
+    private static final int CHAMFER_AXIS = 5;        // cost for axial steps in chamfer transform
+    private static final int CHAMFER_DIAGONAL = 7;    // cost for diagonal steps (≈√2 * AXIS)
+    private static final int CHAMFER_INF = Integer.MAX_VALUE / 4;
+    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN = ThreadLocal.withInitial(
+        () -> new boolean[16 + MOUNTAIN_DIST_HALO * 2][16 + MOUNTAIN_DIST_HALO * 2]);
+    private static final ThreadLocal<int[][]> TL_DIST = ThreadLocal.withInitial(
+        () -> new int[16 + MOUNTAIN_DIST_HALO * 2][16 + MOUNTAIN_DIST_HALO * 2]);
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
@@ -964,7 +974,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
 
         // Precompute ocean mask (smoothed) for this chunk
-        double[][] distToMtn = new double[16][16];
+        double[][] distToMtn = computeMountainDistances(world, seed, surf, chunkBaseX, chunkBaseZ, worldMaxY, MOUNTAIN_SEARCH_RADIUS);
         double[][] threshold = new double[16][16];
         double[][] oceanRaw = new double[16][16];
         double[][] oceanMask = new double[16][16];
@@ -974,8 +984,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 // Low-frequency shoreline jitter to avoid geometric borders
                 double shoreJitter = (fbm2(seed ^ 0x7A1B2C3DL, wx * 0.01, wz * 0.01) - 0.5) * (SHORE_JITTER_AMPLITUDE * 2.0);
                 threshold[lx][lz] = OCEAN_FROM_MOUNTAIN_DIST + shoreJitter; // base threshold with low-freq jitter
-                double d = distanceToMountainApprox(world, seed, wx, wz, worldMaxY, MOUNTAIN_SEARCH_RADIUS);
-                distToMtn[lx][lz] = d;
+                double d = distToMtn[lx][lz];
                 double raw = (d - threshold[lx][lz]) / (double) OCEAN_COAST_WIDTH; // <0 land, >0 ocean
                 if (Double.isFinite(raw)) raw = clamp01(0.5 + raw); else raw = 1.0; // far from mountains => ocean
                 oceanRaw[lx][lz] = raw;
@@ -1370,41 +1379,82 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         return clamp01((sum * 0.5) + 0.5);
     }
 
-    // Approximate distance in blocks to the nearest mountain cell (surface >= MOUNTAIN_Y)
-    private double distanceToMountainApprox(World world, long seed, int wx, int wz, int worldMaxY, int maxDist) {
-        // Check current cell first
-        int h0 = surfaceApprox(world, seed, wx, wz, worldMaxY);
-        if (h0 >= MOUNTAIN_Y) return 0.0;
+    // Compute distance in blocks to the nearest mountain using a 2-pass chamfer transform
+    private double[][] computeMountainDistances(World world, long seed, double[][] surf, int chunkBaseX, int chunkBaseZ, int worldMaxY, int maxDist) {
+        int halo = Math.min(MOUNTAIN_DIST_HALO, maxDist);
+        int size = 16 + halo * 2;
+        int offset = halo;
+        boolean[][] mountain = TL_MOUNTAIN.get();
+        int[][] dist = TL_DIST.get();
 
-        // Isotropic radial sampling to reduce directional artifacts ("spikes")
-        // Use many evenly spaced directions with a small per-cell angular jitter.
-        final int directions = 48; // increase for smoother, at some CPU cost
-        final double step = 3.0;   // 3-block step to balance cost/accuracy
-        double best = Double.POSITIVE_INFINITY;
+        for (int x = 0; x < size; x++) {
+            java.util.Arrays.fill(mountain[x], 0, size, false);
+            java.util.Arrays.fill(dist[x], 0, size, CHAMFER_INF);
+        }
 
-        // Angular jitter based on seed and position to break symmetry
-        double jitter = (random01(hash(seed, wx, 0x0D15A7C3L, wz, 0x5EED5EEDL)) - 0.5) * (Math.PI / directions);
-
-        for (int i = 0; i < directions; i++) {
-            double theta = (2.0 * Math.PI * i) / directions + jitter;
-            double dx = Math.cos(theta);
-            double dz = Math.sin(theta);
-            double sx = wx;
-            double sz = wz;
-            for (double r = step; r <= maxDist; r += step) {
-                sx += dx * step;
-                sz += dz * step;
-                int ix = (int) Math.floor(sx);
-                int iz = (int) Math.floor(sz);
-                int h = surfaceApprox(world, seed, ix, iz, worldMaxY);
+        boolean any = false;
+        for (int gx = -halo; gx < 16 + halo; gx++) {
+            for (int gz = -halo; gz < 16 + halo; gz++) {
+                double h;
+                if (gx >= 0 && gx < 16 && gz >= 0 && gz < 16) {
+                    h = surf[gx][gz];
+                } else {
+                    int wx = chunkBaseX + gx;
+                    int wz = chunkBaseZ + gz;
+                    h = surfaceApprox(world, seed, wx, wz, worldMaxY);
+                }
                 if (h >= MOUNTAIN_Y) {
-                    double d = Math.hypot(ix - wx, iz - wz);
-                    if (d < best) best = d;
-                    break;
+                    mountain[gx + offset][gz + offset] = true;
+                    dist[gx + offset][gz + offset] = 0;
+                    any = true;
                 }
             }
         }
-        return best;
+
+        double[][] result = new double[16][16];
+        if (!any) {
+            for (int lx = 0; lx < 16; lx++) java.util.Arrays.fill(result[lx], Double.POSITIVE_INFINITY);
+            return result;
+        }
+
+        // Forward pass
+        for (int x = 0; x < size; x++) {
+            for (int z = 0; z < size; z++) {
+                int v = dist[x][z];
+                if (v == 0) continue;
+                if (x > 0) v = Math.min(v, dist[x - 1][z] + CHAMFER_AXIS);
+                if (z > 0) v = Math.min(v, dist[x][z - 1] + CHAMFER_AXIS);
+                if (x > 0 && z > 0) v = Math.min(v, dist[x - 1][z - 1] + CHAMFER_DIAGONAL);
+                if (x < size - 1 && z > 0) v = Math.min(v, dist[x + 1][z - 1] + CHAMFER_DIAGONAL);
+                dist[x][z] = v;
+            }
+        }
+
+        // Backward pass
+        for (int x = size - 1; x >= 0; x--) {
+            for (int z = size - 1; z >= 0; z--) {
+                int v = dist[x][z];
+                if (x < size - 1) v = Math.min(v, dist[x + 1][z] + CHAMFER_AXIS);
+                if (z < size - 1) v = Math.min(v, dist[x][z + 1] + CHAMFER_AXIS);
+                if (x < size - 1 && z < size - 1) v = Math.min(v, dist[x + 1][z + 1] + CHAMFER_DIAGONAL);
+                if (x > 0 && z < size - 1) v = Math.min(v, dist[x - 1][z + 1] + CHAMFER_DIAGONAL);
+                dist[x][z] = v;
+            }
+        }
+
+        for (int lx = 0; lx < 16; lx++) {
+            for (int lz = 0; lz < 16; lz++) {
+                int v = dist[lx + offset][lz + offset];
+                double d;
+                if (v >= CHAMFER_INF) {
+                    d = maxDist;
+                } else {
+                    d = Math.min(maxDist, v / (double) CHAMFER_AXIS);
+                }
+                result[lx][lz] = d;
+            }
+        }
+        return result;
     }
 
     // Recomputes the same surface height logic used to fill surf[][] (approximate, fast)
