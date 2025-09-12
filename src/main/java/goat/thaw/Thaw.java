@@ -29,9 +29,7 @@ import goat.thaw.system.effects.EffectManager;
 import goat.thaw.subsystems.oxygen.OxygenManager;
 import org.bukkit.scheduler.BukkitRunnable;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 
 public final class Thaw extends JavaPlugin {
 
@@ -51,6 +49,15 @@ public final class Thaw extends JavaPlugin {
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
     private SchemManager schematicManager;
+    private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
+            "fire",
+            "scholar",
+            "mourner",
+            "burglar",
+            "farmer",
+            "pacifist"
+            // add more when you create them
+    );
 
     @Override
     public void onEnable() {
@@ -64,6 +71,7 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpaceEventListener(spaceManager, this), this);
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new FirstJoinListener(this), this);
+        getCommand("locateBungalows").setExecutor(new LocateBungalowsCommand());
 
         // Schematic system
         schematicManager = new SchemManager(this);
@@ -167,7 +175,7 @@ public final class Thaw extends JavaPlugin {
                 arctic = wc.createWorld();
 
                 if (arctic != null) {
-                    pregenerateArctic(arctic);
+                    //pregenerateArctic(arctic);
                 }
             } else {
                 Bukkit.getLogger().info("[Thaw] Reloading existing Arctic world...");
@@ -192,9 +200,14 @@ public final class Thaw extends JavaPlugin {
                     Bukkit.getLogger().info("[Thaw] Placing " + toPlace.size() + " bungalows...");
                 }
 
+
                 for (Location loc : toPlace) {
-                    schematicManager.placeStructure("pacifist", loc);
+                    Random rng = new Random();
+                    String chosen = BUNGALOW_SCHEMATICS.get(rng.nextInt(BUNGALOW_SCHEMATICS.size()));
+
+                    schematicManager.placeStructure(chosen, loc);
                     gen.registerBungalow(loc);
+
                 }
             }, 200L, 200L);
         });
@@ -215,45 +228,6 @@ public final class Thaw extends JavaPlugin {
         if (sledManager != null) sledManager.stopAll();
         if (effectManager != null) effectManager.stop();
         if (oxygenManager != null) oxygenManager.stop();
-    }
-    public void pregenerateArctic(World world) {
-        int radius = 32; // 64x64 chunks (center ±32)
-        List<ChunkPos> chunks = new ArrayList<>();
-
-        for (int x = -radius; x <= radius; x++) {
-            for (int z = -radius; z <= radius; z++) {
-                chunks.add(new ChunkPos(x, z));
-            }
-        }
-
-        final int total = chunks.size();
-        final int[] counter = {0};
-
-        Bukkit.getLogger().info("[Thaw] Starting pregeneration of Arctic (" + total + " chunks)...");
-
-        // Process in batches (e.g., 10 per tick)
-        new BukkitRunnable() {
-            final Iterator<ChunkPos> it = chunks.iterator();
-
-            @Override
-            public void run() {
-                int perTick = 1; // tune this number
-                for (int i = 0; i < perTick && it.hasNext(); i++) {
-                    ChunkPos pos = it.next();
-                    world.getChunkAt(pos.x, pos.z); // triggers gen safely
-                    counter[0]++;
-
-                    if (counter[0] % 100 == 0 || !it.hasNext()) {
-                        Bukkit.getLogger().info("[Thaw] Pregenerated " + counter[0] + "/" + total);
-                    }
-                }
-                if (!it.hasNext()) {
-                    Bukkit.getLogger().info("[Thaw] Pregeneration complete!");
-                    cancel();
-                }
-            }
-        }.runTaskTimer(this, 1L, 1L);
-
     }
 
     private static class ChunkPos {

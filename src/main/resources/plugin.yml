@@ -66,6 +66,9 @@ commands:
     usage: /sled <dogCount 1-2>
     permission: thaw.dev
     permission-message: You must be op to use this.
+  locateBungalows:
+    description: List and teleport to bungalow locations
+    usage: /locateBungalows
 permissions:
   thaw.dev:
     description: Access to development commands

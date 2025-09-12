@@ -46,7 +46,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int MOUNTAIN_SEARCH_RADIUS = 224; // how far to look for mountains when computing distance
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
-    private final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
+    public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
 
     public ArcticChunkGenerator() {
@@ -62,55 +62,108 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private boolean isFarFromBungalows(World world, int x, int z) {
-        double minDistSq = BUNGALOW_MIN_DISTANCE * BUNGALOW_MIN_DISTANCE;
-        synchronized (placedBungalows) {
-            for (Location loc : placedBungalows) {
-                if (!loc.getWorld().equals(world)) continue;
-                double dx = loc.getX() - x;
-                double dz = loc.getZ() - z;
-                if (dx * dx + dz * dz < minDistSq) return false;
+    private boolean canPlaceBungalow(World world, ChunkData data, int lx, int lz) {
+        int baseY = getHighestBlockY(data, world, lx, lz);
+        if (baseY < 154 || baseY > 158) {
+            return false; // keep near sea level
+        }
+
+        int minY = baseY;
+        int maxY = baseY;
+        Map<Integer, Integer> heightCounts = new HashMap<>();
+
+        for (int dx = -7; dx <= 7; dx++) {
+            for (int dz = -7; dz <= 7; dz++) {
+                int x = lx + dx;
+                int z = lz + dz;
+
+                // allow scanning across chunk borders
+                int wx = (lx & ~15) + x;
+                int wz = (lz & ~15) + z;
+
+                if (wx < 0 || wz < 0) continue;
+
+                int y = getHighestBlockY(data, world, x & 15, z & 15);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+
+                // Track frequency of heights
+                heightCounts.merge(y, 1, Integer::sum);
+
+                if (y < 154 || y > 158) return false;
+
+                Material topType = data.getType(x & 15, y, z & 15);
+                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT)) {
+                    return false;
+                }
+
+                Material below = data.getType(x & 15, y - 1, z & 15);
+                if (below == Material.WATER || below == Material.SAND) {
+                    return false;
+                }
             }
         }
-        synchronized (bungalowQueue) {
-            for (Location loc : bungalowQueue) {
-                if (!loc.getWorld().equals(world)) continue;
-                double dx = loc.getX() - x;
-                double dz = loc.getZ() - z;
-                if (dx * dx + dz * dz < minDistSq) return false;
+
+        // Accept 1–2 block slope differential
+        if (maxY - minY > 2) return false;
+
+        // Ensure dominant ground height covers majority
+        int dominant = heightCounts.values().stream().max(Integer::compareTo).orElse(0);
+        int total = heightCounts.values().stream().mapToInt(i -> i).sum();
+        if ((dominant / (double) total) < 0.65) {
+            return false; // too uneven, scattered terrain
+        }
+
+        return true;
+    }
+
+
+
+    private boolean isRegionAnchor(int chunkX, int chunkZ) {
+        // Only run on 8×8 chunk anchors
+        return (chunkX % 8 == 0) && (chunkZ % 8 == 0);
+    }
+    public Location findBungalowSpot(World world, ChunkData data, int chunkX, int chunkZ) {
+        int radius = 4;
+        int baseX = (chunkX << 4) + 8;
+        int baseZ = (chunkZ << 4) + 8;
+
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dz = -radius; dz <= radius; dz++) {
+                int wx = baseX + (dx << 4);
+                int wz = baseZ + (dz << 4);
+
+                int lx = wx & 15;
+                int lz = wz & 15;
+
+                if (!canPlaceBungalow(world, data, lx, lz)) continue;
+
+                int y = getHighestBlockY(data, world, lx, lz);
+                Location candidate = new Location(world, wx, y, wz);
+
+                if (!isFarEnough(candidate)) continue;
+
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static final int MIN_BUNGALOW_DIST = 100;
+
+    public boolean isFarEnough(Location loc) {
+        synchronized (placedBungalows) {
+            for (Location other : placedBungalows) {
+                if (other.getWorld().equals(loc.getWorld())) {
+                    if (other.distanceSquared(loc) < MIN_BUNGALOW_DIST * MIN_BUNGALOW_DIST) {
+                        return false;
+                    }
+                }
             }
         }
         return true;
     }
 
-    private boolean canPlaceBungalow(World world, int x, int z) {
-        int baseY = world.getHighestBlockYAt(x, z);
-        if (baseY < 155 || baseY > 156) return false;
-
-        int minY = baseY;
-        int maxY = baseY;
-
-        for (int dx = -7; dx <= 7; dx++) {
-            for (int dz = -7; dz <= 7; dz++) {
-                int wx = x + dx;
-                int wz = z + dz;
-                int y = world.getHighestBlockYAt(wx, wz);
-                if (y < 155 || y > 156) return false;
-
-                Block top = world.getBlockAt(wx, y, wz);
-                Material topType = top.getType();
-                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK)) return false;
-
-                Material below = top.getRelative(0, -1, 0).getType();
-                if (below == Material.WATER || below == Material.SAND) return false;
-
-                if (y < minY) minY = y;
-                if (y > maxY) maxY = y;
-            }
-        }
-
-        return minY == maxY;
-    }
 
     @Override
     public ChunkData generateChunkData(World world, Random random, int chunkX, int chunkZ, BiomeGrid biome) {
@@ -120,7 +173,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         // 1) Stone fill below sub-land only (leave 150+ empty for land tiers)
         final int SUBLAND_MIN = 150;
-        final int SUBLAND_MAX = 159;
+
         int yFillMin = Math.max(world.getMinHeight(), AUDIT_Y_MIN);
         int yFillMax = Math.min(world.getMaxHeight() - 1, SUBLAND_MIN - 1); // up to 149
         for (int x = 0; x < 16; x++) {
@@ -145,72 +198,46 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         // 6) Decoration pass on surface (after carving): trees, boulders
         placeTaigaClusters(world, data, seed, chunkX, chunkZ, biome);
-        placeBoulders(world, data, seed, chunkX, chunkZ, biome);
 
         // 7) Structures (emerald slabs) after carving; air-exposed
-        int centerX = (chunkX << 4) + 8;
-        int centerZ = (chunkZ << 4) + 8;
-        int maxRadius = 6; // how many chunks outward to spiral (adjust as needed)
-
-        boolean placed = false;
-
-        outer:
-        for (int r = 0; r <= maxRadius; r++) {
-            // Spiral around radius r
-            for (int dx = -r; dx <= r; dx++) {
-                for (int dz = -r; dz <= r; dz++) {
-                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // only edges of the square (spiral layer)
-
-                    int wx = centerX + (dx << 4); // shift by whole chunks
-                    int wz = centerZ + (dz << 4);
-
-                    if (isFarFromBungalows(world, wx, wz) && canPlaceBungalow(world, wx, wz)) {
-                        int y = world.getHighestBlockYAt(wx, wz);
-                        synchronized (bungalowQueue) {
-                            bungalowQueue.add(new Location(world, wx, y, wz));
-                        }
-                        placed = true;
-                        break outer;
-                    }
+        // bungalow logic only for region anchors
+        if (isRegionAnchor(chunkX, chunkZ)) {
+            Bukkit.getLogger().info("[Bungalow] Checking region anchor ("+chunkX+","+chunkZ+")");
+            Location spot = findBungalowSpot(world, data, chunkX, chunkZ);
+            if (spot != null) {
+                synchronized (bungalowQueue) {
+                    bungalowQueue.add(spot);
                 }
+                Bukkit.getLogger().info("[Bungalow] Added bungalow to queue at "+spot);
             }
         }
 
-        if (!placed) {
-            Bukkit.getLogger().info("No valid bungalow found near " + chunkX + "," + chunkZ);
-        }
 
+        placeBoulders(world, data, seed, chunkX, chunkZ, biome);
 
 
         // 8) Bedrock band overwrite at bottom (vanilla-like)
         placeBedrock(world, data, seed, chunkX, chunkZ);
-        
+
         // 9) Post-process: enforce sand rules near water and above sand
         postProcessSandAndDirt(world, data);
 
         return data;
     }
-
-    // Tier 1: Y 150..159, gradual dirt->stone transition
-    private void generateSubLandTransition(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
-        final int y0 = 150;
-        final int y1 = 159;
-        if (AUDIT_Y_MAX < y1) return;
-        for (int x = 0; x < 16; x++) {
-            for (int z = 0; z < 16; z++) {
-                int wx = (chunkX << 4) + x;
-                int wz = (chunkZ << 4) + z;
-                for (int y = y0; y <= y1; y++) {
-                    double t = (y - y0) / 9.0; // 0..1 across 10 blocks
-                    // Slight spatial noise to avoid flat bands
-                    double n = valueNoise2(seed ^ 0x5AB10ADL, wx * 0.03, wz * 0.03);
-                    double pDirt = clamp01(t * 0.85 + n * 0.15);
-                    Material m = (random01(hash(seed, wx, y, wz, 0xD17D711L)) < pDirt) ? Material.DIRT : Material.STONE;
-                    data.setBlock(x, y, z, m);
-                }
+    // Safe alternative to world.getHighestBlockYAt, works on in-progress ChunkData
+    private int getHighestBlockY(ChunkData data, World world, int lx, int lz) {
+        int yTop = Math.min(world.getMaxHeight() - 1, AUDIT_Y_MAX);
+        int yBottom = Math.max(world.getMinHeight(), AUDIT_Y_MIN);
+        for (int y = yTop; y >= yBottom; y--) {
+            Material m = data.getType(lx, y, lz);
+            if (m != Material.AIR) {
+                return y;
             }
         }
+        return yBottom; // fallback
     }
+
+
 
     private void placeBedrock(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
         final int yMin = Math.max(world.getMinHeight(), -64);
@@ -346,66 +373,6 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             }
         }
     }
-
-    private void placeStructures(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
-        // Structures twice as rare as diamonds: compute a per-chunk roll
-        double diamondChunkChance = 0.02; // rough baseline for audit visibility
-        double structureChance = diamondChunkChance * 0.5; // "twice as rare" means lower probability
-
-        double roll = random01(hash(seed, chunkX, chunkZ, 0, 0x5A7C57C3L));
-        if (roll >= structureChance) return;
-
-        // Pick a Y within cave band where we likely have air exposure
-        int y = clamp(-58 + (int) (random01(hash(seed, chunkX, chunkZ, 1, 0xE11E11E1L)) * 25), CAVE_MIN_Y, AUDIT_Y_MAX);
-
-        // Choose top-left within chunk ensuring some footprint; allow clipping at edges safely
-        int ox = (int) (random01(hash(seed, chunkX, chunkZ, 2, 0xA1B2C3D4L)) * 16);
-        int oz = (int) (random01(hash(seed, chunkX, chunkZ, 3, 0xD4C3B2A1L)) * 16);
-
-        // Place slab (X x Z x 1)
-        boolean hasExposure = false;
-        for (int dx = 0; dx < STRUCT_W; dx++) {
-            for (int dz = 0; dz < STRUCT_L; dz++) {
-                int lx = ox + dx;
-                int lz = oz + dz;
-                if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue; // clip to chunk
-                // Check for air exposure around perimeter cells
-                if (!hasExposure && isAdjacentToAir(data, lx, y, lz)) {
-                    hasExposure = true;
-                }
-            }
-        }
-
-        if (!hasExposure) return; // ensure at least one block is air-exposed
-
-        for (int dx = 0; dx < STRUCT_W; dx++) {
-            for (int dz = 0; dz < STRUCT_L; dz++) {
-                int lx = ox + dx;
-                int lz = oz + dz;
-                if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
-                if (y < AUDIT_Y_MIN || y > AUDIT_Y_MAX) continue;
-                data.setBlock(lx, y, lz, Material.EMERALD_BLOCK);
-            }
-        }
-    }
-
-    private boolean isAdjacentToAir(ChunkData data, int lx, int y, int lz) {
-        if (y < Math.max(CAVE_MIN_Y, AUDIT_Y_MIN) || y > Math.min(CAVE_MAX_Y, AUDIT_Y_MAX)) return false;
-        int[][] dirs = { {1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1} };
-        for (int[] d : dirs) {
-            int nx = lx + d[0];
-            int ny = y + d[1];
-            int nz = lz + d[2];
-            if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
-            if (ny < AUDIT_Y_MIN || ny > AUDIT_Y_MAX) continue;
-            try { if (data.getType(nx, ny, nz) == Material.AIR) return true; } catch (Throwable ignore) {}
-        }
-        return false;
-    }
-
-    private double caveField(long seed, int wx, int wy, int wz) { return 0; }
-
-    // --- Extras: trees, boulders ---
 
     private int surfaceY(ChunkData data, int lx, int lz, int top) {
         for (int y = Math.min(top, AUDIT_Y_MAX); y >= 0; y--) {

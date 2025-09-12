@@ -19,21 +19,19 @@ public class RegenerateArcticCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player)) {
-            sender.sendMessage("§cOnly players can use this command.");
-            return true;
-        }
-        Player player = (Player) sender;
+
+        sender.sendMessage("§e[Thaw] Starting regeneration of Arctic...");
 
         // 1) Decommission existing world (if present)
         World existing = Bukkit.getWorld(WORLD_NAME);
         if (existing != null) {
-            // Move any players out first
             World fallback = Bukkit.getWorlds().get(0);
             for (Player p : existing.getPlayers()) {
                 p.teleport(fallback.getSpawnLocation());
+                p.sendMessage("§cThe Arctic world is being regenerated. You have been teleported to spawn.");
             }
             Bukkit.unloadWorld(existing, false);
+            sender.sendMessage("§e[Thaw] Unloaded existing Arctic world.");
         }
         File container = Bukkit.getWorldContainer();
         File folder = new File(container, WORLD_NAME);
@@ -43,27 +41,27 @@ public class RegenerateArcticCommand implements CommandExecutor {
         WorldCreator creator = new WorldCreator(WORLD_NAME).generator(new ArcticChunkGenerator());
         World world = creator.createWorld();
         if (world == null) {
-            sender.sendMessage("§cFailed to create world '" + WORLD_NAME + "'.");
+            sender.sendMessage("§c[Thaw] Failed to create world '" + WORLD_NAME + "'.");
             return true;
         }
 
-        // 3) Warp executor to safe Y in the new world
-        Location spawn = world.getSpawnLocation().clone();
-        int x = spawn.getBlockX();
-        int z = spawn.getBlockZ();
-        int highest = world.getHighestBlockYAt(x, z);
-        int safeY = Math.max(highest + 1, world.getMinHeight() + 2);
-        spawn.setY(safeY);
-        spawn.setYaw(player.getLocation().getYaw());
-        spawn.setPitch(player.getLocation().getPitch());
+        // 3) Handle player teleport if executed by a player
+        if (sender instanceof Player) {
+            Player player = (Player) sender;
+            Location spawn = world.getSpawnLocation().clone();
+            int x = spawn.getBlockX();
+            int z = spawn.getBlockZ();
+            int highest = world.getHighestBlockYAt(x, z);
+            int safeY = Math.max(highest + 1, world.getMinHeight() + 2);
+            spawn.setY(safeY);
+            spawn.setYaw(player.getLocation().getYaw());
+            spawn.setPitch(player.getLocation().getPitch());
 
-        player.teleport(spawn);
-        player.sendMessage("§aRegenerated and warped to §f" + WORLD_NAME);
-
-// Pregenerate new Arctic region
-        Bukkit.getScheduler().runTaskLater(JavaPlugin.getPlugin(Thaw.class), () -> {
-            ((Thaw) JavaPlugin.getPlugin(Thaw.class)).pregenerateArctic(world);
-        }, 20L); // 1 second delay so world is fully loaded
+            player.teleport(spawn);
+            player.sendMessage("§a[Thaw] Regenerated and warped to §f" + WORLD_NAME);
+        } else {
+            sender.sendMessage("§a[Thaw] Regenerated Arctic world (console execution, no teleport).");
+        }
         return true;
     }
 
@@ -78,4 +76,3 @@ public class RegenerateArcticCommand implements CommandExecutor {
         return file.delete();
     }
 }
-
