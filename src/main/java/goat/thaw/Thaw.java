@@ -194,6 +194,7 @@ public final class Thaw extends JavaPlugin {
 
                 for (Location loc : toPlace) {
                     schematicManager.placeStructure("pacifist", loc);
+                    gen.registerBungalow(loc);
                 }
             }, 200L, 200L);
         });

@@ -7,7 +7,6 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.generator.ChunkGenerator;
 import org.bukkit.block.Biome;
-import org.bukkit.plugin.java.JavaPlugin;
 
 import java.util.*;
 
@@ -25,8 +24,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int STRUCT_W = 10;
     private static final int STRUCT_L = 20;
 
-    // Structures: 1 in N chance per chunk
-    private static final int BUNGALOW_CHANCE = 1000; // "1/<BUNGALOW_CHANCE> per chunk"
+    private static final int BUNGALOW_MIN_DISTANCE = 100;
 
     // Ore weights (relative rarity baseline, lower is rarer)
     // User-specified
@@ -48,6 +46,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int MOUNTAIN_SEARCH_RADIUS = 224; // how far to look for mountains when computing distance
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
+    private final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
 
     public ArcticChunkGenerator() {
@@ -56,37 +55,61 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     public static ArcticChunkGenerator getInstance() {
         return instance;
     }
+
+    public void registerBungalow(Location loc) {
+        synchronized (placedBungalows) {
+            placedBungalows.add(loc);
+        }
+    }
+
+    private boolean isFarFromBungalows(World world, int x, int z) {
+        double minDistSq = BUNGALOW_MIN_DISTANCE * BUNGALOW_MIN_DISTANCE;
+        synchronized (placedBungalows) {
+            for (Location loc : placedBungalows) {
+                if (!loc.getWorld().equals(world)) continue;
+                double dx = loc.getX() - x;
+                double dz = loc.getZ() - z;
+                if (dx * dx + dz * dz < minDistSq) return false;
+            }
+        }
+        synchronized (bungalowQueue) {
+            for (Location loc : bungalowQueue) {
+                if (!loc.getWorld().equals(world)) continue;
+                double dx = loc.getX() - x;
+                double dz = loc.getZ() - z;
+                if (dx * dx + dz * dz < minDistSq) return false;
+            }
+        }
+        return true;
+    }
+
     private boolean canPlaceBungalow(World world, int x, int z) {
         int baseY = world.getHighestBlockYAt(x, z);
-
-        // Must be exactly 155 or 156
         if (baseY < 155 || baseY > 156) return false;
 
-        Block block = world.getBlockAt(x, baseY - 1, z);
-        Material type = block.getType();
-
-        // No water foundations
-        if (type == Material.WATER || type == Material.ICE) return false;
-
-        // Check 15x15 flat snow/snow_block platform
         int minY = baseY;
         int maxY = baseY;
+
         for (int dx = -7; dx <= 7; dx++) {
             for (int dz = -7; dz <= 7; dz++) {
-                Block b = world.getBlockAt(x + dx, baseY - 1, z + dz);
-                if (!(b.getType() == Material.SNOW || b.getType() == Material.SNOW_BLOCK)) {
-                    return false;
-                }
-                int y = b.getY();
+                int wx = x + dx;
+                int wz = z + dz;
+                int y = world.getHighestBlockYAt(wx, wz);
+                if (y < 155 || y > 156) return false;
+
+                Block top = world.getBlockAt(wx, y, wz);
+                Material topType = top.getType();
+                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK)) return false;
+
+                Material below = top.getRelative(0, -1, 0).getType();
+                if (below == Material.WATER || below == Material.SAND) return false;
+
                 if (y < minY) minY = y;
                 if (y > maxY) maxY = y;
             }
         }
 
-        // Require all same level (no hills)
-        if (minY != maxY) return false;
-
-        return true;
+        return minY == maxY;
     }
 
     @Override
@@ -125,37 +148,36 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         placeBoulders(world, data, seed, chunkX, chunkZ, biome);
 
         // 7) Structures (emerald slabs) after carving; air-exposed
-        if (random.nextInt(BUNGALOW_CHANCE) == 0) {
-            int centerX = (chunkX << 4) + 8;
-            int centerZ = (chunkZ << 4) + 8;
-            int maxRadius = 6; // how many chunks outward to spiral (adjust as needed)
+        int centerX = (chunkX << 4) + 8;
+        int centerZ = (chunkZ << 4) + 8;
+        int maxRadius = 6; // how many chunks outward to spiral (adjust as needed)
 
-            boolean placed = false;
+        boolean placed = false;
 
-            outer:
-            for (int r = 0; r <= maxRadius; r++) {
-                // Spiral around radius r
-                for (int dx = -r; dx <= r; dx++) {
-                    for (int dz = -r; dz <= r; dz++) {
-                        if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // only edges of the square (spiral layer)
+        outer:
+        for (int r = 0; r <= maxRadius; r++) {
+            // Spiral around radius r
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dz = -r; dz <= r; dz++) {
+                    if (Math.abs(dx) != r && Math.abs(dz) != r) continue; // only edges of the square (spiral layer)
 
-                        int wx = centerX + (dx << 4); // shift by whole chunks
-                        int wz = centerZ + (dz << 4);
+                    int wx = centerX + (dx << 4); // shift by whole chunks
+                    int wz = centerZ + (dz << 4);
 
-                        if (canPlaceBungalow(world, wx, wz)) {
-                            int y = world.getHighestBlockYAt(wx, wz);
+                    if (isFarFromBungalows(world, wx, wz) && canPlaceBungalow(world, wx, wz)) {
+                        int y = world.getHighestBlockYAt(wx, wz);
+                        synchronized (bungalowQueue) {
                             bungalowQueue.add(new Location(world, wx, y, wz));
-                            placed = true;
-                            break outer;
                         }
+                        placed = true;
+                        break outer;
                     }
                 }
             }
+        }
 
-            if (!placed) {
-                // If spiral failed entirely, you can log it or just let it fail silently.
-                Bukkit.getLogger().info("No valid bungalow found near " + chunkX + "," + chunkZ);
-            }
+        if (!placed) {
+            Bukkit.getLogger().info("No valid bungalow found near " + chunkX + "," + chunkZ);
         }
 
 
@@ -185,48 +207,6 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     double pDirt = clamp01(t * 0.85 + n * 0.15);
                     Material m = (random01(hash(seed, wx, y, wz, 0xD17D711L)) < pDirt) ? Material.DIRT : Material.STONE;
                     data.setBlock(x, y, z, m);
-                }
-            }
-        }
-    }
-    private void placeBungalow(World world, Random random, int chunkX, int chunkZ) {
-        if (random.nextInt(BUNGALOW_CHANCE) != 0) return; // 1/N chunks
-
-        int chunkBaseX = (chunkX << 4);
-        int chunkBaseZ = (chunkZ << 4);
-
-        // Scan for a 10x10 patch of snow/snow_block
-        for (int lx = 0; lx <= 6; lx++) {       // 16-10 = 6 max offset
-            for (int lz = 0; lz <= 6; lz++) {
-                boolean patch = true;
-                int baseY = -1;
-
-                // Check the 10x10 area
-                for (int dx = 0; dx < 10 && patch; dx++) {
-                    for (int dz = 0; dz < 10 && patch; dz++) {
-                        int wx = chunkBaseX + lx + dx;
-                        int wz = chunkBaseZ + lz + dz;
-                        int y = world.getHighestBlockYAt(wx, wz);
-                        Material mat = world.getBlockAt(wx, y - 1, wz).getType();
-
-                        if (!(mat == Material.SNOW_BLOCK || mat == Material.SNOW)) {
-                            patch = false;
-                            break;
-                        }
-
-                        if (baseY == -1) baseY = y;
-                        else if (Math.abs(y - baseY) > 2) { // keep terrain flat-ish
-                            patch = false;
-                        }
-                    }
-                }
-
-                // If patch found → paste structure
-                if (patch) {
-                    Location loc = new Location(world, chunkBaseX + lx, baseY, chunkBaseZ + lz);
-                    JavaPlugin plugin = JavaPlugin.getProvidingPlugin(getClass());
-                    new SchemManager(plugin).placeStructure("pacifist", loc);
-                    return; // one structure per chunk
                 }
             }
         }
