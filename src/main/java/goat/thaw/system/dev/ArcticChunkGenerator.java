@@ -18,13 +18,10 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     // Cave carve vertical limits
     private static final int CAVE_MIN_Y = -50; // protect bedrock band below
-    private static final int CAVE_MAX_Y = 180; // reduce surface cutting; no river-like carving above 180
+    private static final int CAVE_MAX_Y = 260; // reduce surface cutting; no river-like carving above 180
 
     // Structure size (X x Z)
-    private static final int STRUCT_W = 10;
-    private static final int STRUCT_L = 20;
 
-    private static final int BUNGALOW_MIN_DISTANCE = 100;
 
     // Ore weights (relative rarity baseline, lower is rarer)
     // User-specified
@@ -47,14 +44,23 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
 
     // Distance field configuration
-    private static final int MOUNTAIN_DIST_HALO = 64; // extra cells around chunk for distance field
-    private static final int CHAMFER_AXIS = 5;        // cost for axial steps in chamfer transform
-    private static final int CHAMFER_DIAGONAL = 7;    // cost for diagonal steps (≈√2 * AXIS)
+    // Distance field configuration
+    private static final int BASE_HALO = 64;
+    // halo should at least cover the shoreline distance
+    private static final int MAX_HALO = Math.min(
+            MOUNTAIN_SEARCH_RADIUS,
+            Math.max(BASE_HALO, OCEAN_FROM_MOUNTAIN_DIST)
+    );
+
+    private static final int CHAMFER_AXIS = 5;        // cost for axial steps
+    private static final int CHAMFER_DIAGONAL = 7;    // cost for diagonals
     private static final int CHAMFER_INF = Integer.MAX_VALUE / 4;
-    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN = ThreadLocal.withInitial(
-        () -> new boolean[16 + MOUNTAIN_DIST_HALO * 2][16 + MOUNTAIN_DIST_HALO * 2]);
-    private static final ThreadLocal<int[][]> TL_DIST = ThreadLocal.withInitial(
-        () -> new int[16 + MOUNTAIN_DIST_HALO * 2][16 + MOUNTAIN_DIST_HALO * 2]);
+
+    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN =
+            ThreadLocal.withInitial(() -> new boolean[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
+    private static final ThreadLocal<int[][]> TL_DIST =
+            ThreadLocal.withInitial(() -> new int[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
+
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
@@ -1381,7 +1387,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     // Compute distance in blocks to the nearest mountain using a 2-pass chamfer transform
     private double[][] computeMountainDistances(World world, long seed, double[][] surf, int chunkBaseX, int chunkBaseZ, int worldMaxY, int maxDist) {
-        int halo = Math.min(MOUNTAIN_DIST_HALO, maxDist);
+        int halo = Math.min(MAX_HALO, maxDist);
         int size = 16 + halo * 2;
         int off = halo;
         boolean[][] mountain = TL_MOUNTAIN.get();

@@ -91,7 +91,6 @@ public class BungalowLootManager {
                             Chest liveChest = (Chest) liveBlock.getState();
                             Inventory inv = liveChest.getInventory(); // guaranteed live container
                             populateChest(inv, type);
-                            inv.addItem(new ItemStack(Material.COBBLED_DEEPSLATE));
 
                             Bukkit.getLogger().info("[Thaw] Chest before update: " + Arrays.toString(inv.getContents()));
 
