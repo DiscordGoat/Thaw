@@ -46,17 +46,20 @@ public class SimpleLootPopulator {
 
             ItemStack item = entry.roll();
 
-            // pick a random empty slot
+// pick a random empty slot
             int attempts = 0;
             int slot;
+            ItemStack existing;
             do {
                 slot = rng.nextInt(inv.getSize());
+                existing = inv.getItem(slot);
                 attempts++;
-            } while (inv.getItem(slot) != null && attempts < 10);
+            } while (existing != null && existing.getType() != Material.AIR && attempts < 10);
 
             if (attempts < 10) {
                 inv.setItem(slot, item);
             }
+
         }
     }
 

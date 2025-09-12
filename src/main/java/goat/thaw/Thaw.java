@@ -219,8 +219,8 @@ public final class Thaw extends JavaPlugin {
                     schematicManager.placeStructure(chosen, loc);
                     
                     // Populate loot in the bungalow
-                    lootManager.populateLoot(loc, chosen.toUpperCase());
-                    
+                    String type = chosen.toUpperCase();
+                    Bukkit.getScheduler().runTaskLater(this, () -> lootManager.populateLoot(loc, type), 20L);
                     // Register the bungalow
                     gen.registerBungalow(loc);
 

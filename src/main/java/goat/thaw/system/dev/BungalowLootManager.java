@@ -93,7 +93,6 @@ public class BungalowLootManager {
                             populateChest(inv, type);
                             inv.addItem(new ItemStack(Material.COBBLED_DEEPSLATE));
 
-                            liveChest.update(true, true);
                             Bukkit.getLogger().info("[Thaw] Chest before update: " + Arrays.toString(inv.getContents()));
 
                             Bukkit.getLogger().info("[Thaw] Populated chest at " + chestLoc);
