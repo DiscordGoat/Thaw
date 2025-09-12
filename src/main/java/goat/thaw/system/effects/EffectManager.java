@@ -28,6 +28,7 @@ public class EffectManager implements Listener {
 
     // Per-player active effects
     private final Map<UUID, Map<EffectId, ActiveEffect>> active = new HashMap<>();
+    private final Set<UUID> disabled = new HashSet<>();
 
     public EffectManager(JavaPlugin plugin, StatsManager statsManager) {
         this.plugin = plugin;
@@ -117,18 +118,21 @@ public class EffectManager implements Listener {
 
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
-        loadFromDisk(e.getPlayer().getUniqueId());
+        UUID id = e.getPlayer().getUniqueId();
+        if (!disabled.contains(id)) loadFromDisk(id);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
-        saveToDisk(e.getPlayer().getUniqueId());
+        UUID id = e.getPlayer().getUniqueId();
+        if (!disabled.contains(id)) saveToDisk(id);
     }
 
     // Tick loop: handle circumstantial + timed countdown
     private void tick() {
         for (Player p : Bukkit.getOnlinePlayers()) {
             UUID id = p.getUniqueId();
+            if (disabled.contains(id)) continue;
 
             // Circumstantial: Hypoxia based on Oxygen
             evaluateHypoxia(p);
@@ -161,6 +165,34 @@ public class EffectManager implements Listener {
                 if (ended != null) clearEffectPotions(p, eid, ended.getLevel());
             }
         }
+    }
+
+    // Toggle all effects for a player, returning true if enabled after call
+    public boolean toggle(UUID uuid) {
+        if (disabled.remove(uuid)) {
+            loadFromDisk(uuid);
+            Player p = Bukkit.getPlayer(uuid);
+            if (p != null) {
+                Map<EffectId, ActiveEffect> map = active.get(uuid);
+                if (map != null) {
+                    for (ActiveEffect ae : map.values()) {
+                        if (ae.getLevel() > 0) applyEffectPotions(p, ae.getId(), ae.getLevel());
+                    }
+                }
+            }
+            return true; // enabled
+        }
+
+        disabled.add(uuid);
+        saveToDisk(uuid);
+        Map<EffectId, ActiveEffect> map = active.remove(uuid);
+        Player p = Bukkit.getPlayer(uuid);
+        if (p != null && map != null) {
+            for (Map.Entry<EffectId, ActiveEffect> e : map.entrySet()) {
+                clearEffectPotions(p, e.getKey(), e.getValue().getLevel());
+            }
+        }
+        return false; // disabled
     }
 
     private void evaluateHypoxia(Player p) {
