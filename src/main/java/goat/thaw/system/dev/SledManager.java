@@ -4,21 +4,26 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.Chunk;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Boat;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Wolf;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerUnleashEntityEvent;
 import org.bukkit.event.entity.EntityUnleashEvent;
 import org.bukkit.event.entity.ItemSpawnEvent;
+import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.vehicle.VehicleExitEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
+import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.type.Slab;
@@ -27,6 +32,7 @@ import org.bukkit.block.data.type.Snow;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.Random;
 
 /**
  * Dev SLED system: spawns a gravity-less boat steered by the player's crosshair.
@@ -35,6 +41,7 @@ public class SledManager implements Listener {
 
     private final JavaPlugin plugin;
     private final Map<UUID, Session> sessions = new HashMap<>();
+    private final Random random = new Random();
 
     private static class Session {
         UUID playerId;
@@ -47,9 +54,10 @@ public class SledManager implements Listener {
         java.util.List<org.bukkit.entity.Wolf> dogs = new java.util.ArrayList<>();
         ArmorStand leadHolder;
         int animTick;
-        int dogCount = 2; // 1-2
+        int dogCount = 2; // 1-4
         int descendDelayTicks; // delay before starting descent
         boolean descentArmed;  // prevents re-arming while hovering above target
+        boolean realDogs;      // using player's own dogs
     }
 
     public SledManager(JavaPlugin plugin) {
@@ -62,6 +70,15 @@ public class SledManager implements Listener {
     public void startSled(Player p) { startSled(p, 2); }
 
     public void startSled(Player p, int dogCount) {
+        startSled(p, dogCount, null);
+    }
+
+    public void startSled(Player p, java.util.List<Wolf> dogs) {
+        if (dogs == null || dogs.isEmpty()) return;
+        startSled(p, Math.min(4, dogs.size()), dogs);
+    }
+
+    private void startSled(Player p, int dogCount, java.util.List<Wolf> realDogs) {
         stopSled(p); // ensure clean state
         World w = p.getWorld();
         Location base = p.getLocation().clone();
@@ -95,13 +112,39 @@ public class SledManager implements Listener {
         s.marker = mark;
         s.heightTargetY = mark.getLocation().getY();
         s.heightLerpTicks = 1;
-        s.dogCount = Math.max(1, Math.min(2, dogCount));
+        s.dogCount = Math.max(1, Math.min(4, dogCount));
+        if (realDogs != null) {
+            s.dogs.addAll(realDogs);
+            s.realDogs = true;
+            for (Wolf d : realDogs) {
+                try { d.setSitting(false); } catch (Throwable ignore) {}
+            }
+        }
         // Spawn husky team visuals anchored relative to the steering marker
         Vector initialDir = s.marker.getLocation().toVector().subtract(boatLoc.toVector());
         if (initialDir.lengthSquared() < 1e-6) initialDir = computeForwardDir(p, boatLoc);
         spawnHuskyTeam(p.getWorld(), s, boatLoc, s.marker.getLocation(), initialDir.normalize());
         s.task = Bukkit.getScheduler().runTaskTimer(plugin, () -> tickSession(p, s), 0L, 1L); // max freq (every tick, no initial delay)
         sessions.put(p.getUniqueId(), s);
+    }
+
+    public void startOrganicSled(Player p) {
+        World w = p.getWorld();
+        Location loc = p.getLocation();
+        java.util.List<Wolf> nearby = new java.util.ArrayList<>();
+        for (Entity e : w.getNearbyEntities(loc, 15, 15, 15)) {
+            if (e instanceof Wolf wolf) {
+                try {
+                    if (wolf.isTamed() && wolf.getOwner() != null && wolf.getOwner().getUniqueId().equals(p.getUniqueId())) {
+                        nearby.add(wolf);
+                    }
+                } catch (Throwable ignore) {}
+            }
+        }
+        if (!nearby.isEmpty()) {
+            if (nearby.size() > 4) nearby = nearby.subList(0, 4);
+            startSled(p, nearby);
+        }
     }
 
     public void stopSled(Player p) {
@@ -111,7 +154,21 @@ public class SledManager implements Listener {
         safeRemove(s.marker);
         safeRemove(s.boat);
         // Cleanup husky team
-        if (s.dogs != null) for (Entity e : new java.util.ArrayList<>(s.dogs)) safeRemove(e);
+        if (s.dogs != null) {
+            for (Entity e : new java.util.ArrayList<>(s.dogs)) {
+                if (s.realDogs && e instanceof Wolf w) {
+                    try { w.leaveVehicle(); } catch (Throwable ignore) {}
+                    try { w.setAI(true); } catch (Throwable ignore) {}
+                    try { w.setGravity(true); } catch (Throwable ignore) {}
+                    try { w.setInvulnerable(false); } catch (Throwable ignore) {}
+                    try { w.setSilent(false); } catch (Throwable ignore) {}
+                    try { w.setCollidable(true); } catch (Throwable ignore) {}
+                    try { w.setLeashHolder(null); } catch (Throwable ignore) {}
+                } else {
+                    safeRemove(e);
+                }
+            }
+        }
         if (s.dogPlatforms != null) for (Entity e : new java.util.ArrayList<>(s.dogPlatforms)) safeRemove(e);
         safeRemove(s.leadHolder);
     }
@@ -148,9 +205,9 @@ public class SledManager implements Listener {
         double baseSpeed = 0.8; // nerfed speed (50%)
         double speedScale = clamp((dist - 3.0) / 3.0, 0.0, 1.0); // 0 at 3m, 1 at 6m+
         double desiredSpeed = baseSpeed * (0.6 + 0.4 * Math.min(1.0, dist / 8.0)) * speedScale;
-        // Linear dog power scaling: 1-4 dogs -> 1x..4x speed
-        int dogCount = Math.max(1, Math.min(2, s.dogCount));
-        desiredSpeed *= dogCount;
+        // Dog power scaling: speed caps after 2 dogs
+        int dogCount = Math.max(1, Math.min(4, s.dogCount));
+        desiredSpeed *= Math.min(2, dogCount);
         Vector desiredVel = dirToMarker.clone().multiply(desiredSpeed);
 
         // Predictive vertical target: aim to match hover height at the marker's column
@@ -419,8 +476,10 @@ public class SledManager implements Listener {
         double[][] OFFSETS;
         if (s.dogCount <= 1) {
             OFFSETS = new double[][]{ {-2.2, 0.0} };
-        } else {
+        } else if (s.dogCount <= 2) {
             OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+        } else {
+            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7} };
         }
         int idx = 0;
         for (double[] off : OFFSETS) {
@@ -435,15 +494,25 @@ public class SledManager implements Listener {
             try { plat.setCollidable(false); } catch (Throwable ignore) {}
             s.dogPlatforms.add(plat);
 
-            org.bukkit.entity.Wolf dog = (org.bukkit.entity.Wolf) w.spawnEntity(base, EntityType.WOLF);
-            try { dog.setAI(false); } catch (Throwable ignore) {}
-            try { dog.setGravity(false); } catch (Throwable ignore) {}
-            try { dog.setAdult(); } catch (Throwable ignore) {}
-            try { dog.setInvulnerable(true); } catch (Throwable ignore) {}
-            try { dog.setSilent(true); } catch (Throwable ignore) {}
-            try { dog.setCollidable(false); } catch (Throwable ignore) {}
+            Wolf dog;
+            if (s.realDogs && idx < s.dogs.size()) {
+                dog = s.dogs.get(idx);
+                try { dog.setAI(false); } catch (Throwable ignore) {}
+                try { dog.setGravity(false); } catch (Throwable ignore) {}
+                try { dog.setInvulnerable(true); } catch (Throwable ignore) {}
+                try { dog.setSilent(true); } catch (Throwable ignore) {}
+                try { dog.setCollidable(false); } catch (Throwable ignore) {}
+            } else {
+                dog = (Wolf) w.spawnEntity(base, EntityType.WOLF);
+                try { dog.setAI(false); } catch (Throwable ignore) {}
+                try { dog.setGravity(false); } catch (Throwable ignore) {}
+                try { dog.setAdult(); } catch (Throwable ignore) {}
+                try { dog.setInvulnerable(true); } catch (Throwable ignore) {}
+                try { dog.setSilent(true); } catch (Throwable ignore) {}
+                try { dog.setCollidable(false); } catch (Throwable ignore) {}
+                s.dogs.add(dog);
+            }
             try { plat.addPassenger(dog); } catch (Throwable ignore) {}
-            s.dogs.add(dog);
             idx++;
         }
         // Attach leashes to the PLAYER so rope goes to the player's hand
@@ -468,8 +537,10 @@ public class SledManager implements Listener {
         double[][] OFFSETS;
         if (s.dogCount <= 1) {
             OFFSETS = new double[][]{ {-2.2, 0.0} };
-        } else {
+        } else if (s.dogCount <= 2) {
             OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+        } else {
+            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7} };
         }
         World w = boatLoc.getWorld();
         // Move lead holder to marker plane (keeps rope length short and consistent)
@@ -544,6 +615,35 @@ public class SledManager implements Listener {
     @EventHandler
     public void onQuit(PlayerQuitEvent e) {
         stopSled(e.getPlayer());
+    }
+
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent e) {
+        if (random.nextDouble() < 0.0005) { // extremely rare
+            Chunk c = e.getChunk();
+            World w = c.getWorld();
+            int x = (c.getX() << 4) + random.nextInt(16);
+            int z = (c.getZ() << 4) + random.nextInt(16);
+            int y = w.getHighestBlockYAt(x, z);
+            Location loc = new Location(w, x + 0.5, y, z + 0.5);
+            try { w.spawnEntity(loc, EntityType.WOLF); } catch (Throwable ignore) {}
+        }
+    }
+
+    @EventHandler
+    public void onInteract(PlayerInteractEntityEvent e) {
+        if (e.getHand() != EquipmentSlot.HAND) return;
+        if (!(e.getRightClicked() instanceof Wolf wolf)) return;
+        Player p = e.getPlayer();
+        try {
+            if (!wolf.isTamed()) return;
+            if (wolf.getOwner() == null || !wolf.getOwner().getUniqueId().equals(p.getUniqueId())) return;
+        } catch (Throwable ignore) { return; }
+        if (p.getInventory().getItemInMainHand() != null && p.getInventory().getItemInMainHand().getType() != Material.AIR) return;
+        e.setCancelled(true);
+        if (!hasSession(p)) {
+            startOrganicSled(p);
+        }
     }
 
     @EventHandler
