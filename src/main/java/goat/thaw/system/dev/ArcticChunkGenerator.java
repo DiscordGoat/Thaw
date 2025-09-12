@@ -61,6 +61,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final ThreadLocal<int[][]> TL_DIST =
             ThreadLocal.withInitial(() -> new int[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
 
+    // --- Bungalows & reserved flats ---
+    private static final int MIN_BUNGALOW_DIST = 100;           // already there
+    private static final int BUNGALOW_RESERVE_RADIUS = 9;       // flat radius (blocks)
+    private static final int MIN_DIST_TO_MOUNTAIN = 120;        // don't hug mountains
+
+    private static final class Reserve {
+        final int x, z, y, r;
+        Reserve(int x, int z, int y, int r) { this.x = x; this.z = z; this.y = y; this.r = r; }
+    }
+    public final List<Reserve> reservedFlats = Collections.synchronizedList(new ArrayList<>());
+
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
@@ -78,57 +89,37 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private boolean canPlaceBungalow(World world, ChunkData data, int lx, int lz) {
+    private boolean canPlaceBungalow(World world, ChunkData data, int lx, int lz, int wx, int wz) {
         int baseY = getHighestBlockY(data, world, lx, lz);
-        if (baseY < 154 || baseY > 158) {
-            return false; // keep near sea level
-        }
+        if (baseY < 154 || baseY > 158) return false;
 
-        int minY = baseY;
-        int maxY = baseY;
+        // reject if any water within 6 blocks from sea band (keeps them out of coves/shallows)
+        if (hasWaterNearby(data, world, lx, lz, 6, 145, OCEAN_SEA_LEVEL + 4)) return false;
+
+        int minY = baseY, maxY = baseY;
         Map<Integer, Integer> heightCounts = new HashMap<>();
 
-        for (int dx = -7; dx <= 7; dx++) {
-            for (int dz = -7; dz <= 7; dz++) {
-                int x = lx + dx;
-                int z = lz + dz;
+        for (int dx = -7; dx <= 7; dx++) for (int dz = -7; dz <= 7; dz++) {
+            int x = (lx + dx) & 15, z = (lz + dz) & 15;
+            int y = getHighestBlockY(data, world, x, z);
+            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+            heightCounts.merge(y, 1, Integer::sum);
 
-                // allow scanning across chunk borders
-                int wx = (lx & ~15) + x;
-                int wz = (lz & ~15) + z;
-
-                if (wx < 0 || wz < 0) continue;
-
-                int y = getHighestBlockY(data, world, x & 15, z & 15);
-                minY = Math.min(minY, y);
-                maxY = Math.max(maxY, y);
-
-                // Track frequency of heights
-                heightCounts.merge(y, 1, Integer::sum);
-
-                if (y < 154 || y > 158) return false;
-
-                Material topType = data.getType(x & 15, y, z & 15);
-                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT)) {
-                    return false;
-                }
-
-                Material below = data.getType(x & 15, y - 1, z & 15);
-                if (below == Material.WATER || below == Material.SAND) {
-                    return false;
-                }
-            }
+            if (y < 154 || y > 158) return false;
+            Material topType = data.getType(x, y, z);
+            if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT)) return false;
+            Material below = data.getType(x, y - 1, z);
+            if (below == Material.WATER || below == Material.SAND) return false;
         }
 
-        // Accept 1–2 block slope differential
         if (maxY - minY > 2) return false;
 
-        // Ensure dominant ground height covers majority
         int dominant = heightCounts.values().stream().max(Integer::compareTo).orElse(0);
         int total = heightCounts.values().stream().mapToInt(i -> i).sum();
-        if ((dominant / (double) total) < 0.65) {
-            return false; // too uneven, scattered terrain
-        }
+        if ((dominant / (double) total) < 0.65) return false;
+
+        // keep away from mountains
+        if (distanceToNearestPeak(world.getSeed(), wx, wz, 16) < MIN_DIST_TO_MOUNTAIN) return false;
 
         return true;
     }
@@ -141,31 +132,25 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     }
     public Location findBungalowSpot(World world, ChunkData data, int chunkX, int chunkZ) {
         int radius = 4;
-        int baseX = (chunkX << 4) + 8;
-        int baseZ = (chunkZ << 4) + 8;
+        int baseX = (chunkX << 4) + 8, baseZ = (chunkZ << 4) + 8;
 
-        for (int dx = -radius; dx <= radius; dx++) {
-            for (int dz = -radius; dz <= radius; dz++) {
-                int wx = baseX + (dx << 4);
-                int wz = baseZ + (dz << 4);
+        for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
+            int wx = baseX + (dx << 4), wz = baseZ + (dz << 4);
+            int lx = wx & 15, lz = wz & 15;
 
-                int lx = wx & 15;
-                int lz = wz & 15;
+            if (!canPlaceBungalow(world, data, lx, lz, wx, wz)) continue;
+            int y = getHighestBlockY(data, world, lx, lz);
+            Location candidate = new Location(world, wx, y, wz);
+            if (!isFarEnough(candidate)) continue;
 
-                if (!canPlaceBungalow(world, data, lx, lz)) continue;
-
-                int y = getHighestBlockY(data, world, lx, lz);
-                Location candidate = new Location(world, wx, y, wz);
-
-                if (!isFarEnough(candidate)) continue;
-
-                return candidate;
-            }
+            // remember a flat reservation (used inside terrain fill)
+            reserveFlatArea(candidate, y, BUNGALOW_RESERVE_RADIUS);
+            // locally flatten right now (covers the current chunk; neighbors will honor the reserve when they gen)
+            flattenForBungalowNow(data, world, lx, lz, y, BUNGALOW_RESERVE_RADIUS);
+            return candidate;
         }
         return null;
     }
-
-    private static final int MIN_BUNGALOW_DIST = 100;
 
     public boolean isFarEnough(Location loc) {
         synchronized (placedBungalows) {
@@ -178,6 +163,19 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             }
         }
         return true;
+    }
+
+    private void flattenForBungalowNow(ChunkData data, World world, int cx, int cz, int y, int r) {
+        int yTop = Math.min(world.getMaxHeight() - 1, AUDIT_Y_MAX);
+        for (int dx = -r; dx <= r; dx++) for (int dz = -r; dz <= r; dz++) {
+            int lx = cx + dx, lz = cz + dz; if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
+            if (dx * dx + dz * dz > r * r) continue;
+            for (int yy = 150; yy <= yTop; yy++) {
+                if (yy < y) data.setBlock(lx, yy, lz, Material.DIRT);
+                else if (yy == y) data.setBlock(lx, yy, lz, Material.SNOW_BLOCK);
+                else data.setBlock(lx, yy, lz, Material.AIR);
+            }
+        }
     }
 
 
@@ -251,6 +249,46 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             }
         }
         return yBottom; // fallback
+    }
+
+    private boolean hasWaterNearby(ChunkData data, World world, int lx, int lz, int radius, int yMin, int yMax) {
+        int r2 = radius * radius;
+        for (int dx = -radius; dx <= radius; dx++) {
+            int x = lx + dx; if (x < 0 || x > 15) continue;
+            int dx2 = dx * dx;
+            for (int dz = -radius; dz <= radius; dz++) {
+                if (dx2 + dz * dz > r2) continue;
+                int z = lz + dz; if (z < 0 || z > 15) continue;
+                for (int y = yMin; y <= yMax; y++) {
+                    try { if (data.getType(x, y, z) == Material.WATER) return true; } catch (Throwable ignore) {}
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean insideReserve(int wx, int wz) {
+        synchronized (reservedFlats) {
+            for (Reserve r : reservedFlats) {
+                int dx = wx - r.x, dz = wz - r.z;
+                if (dx * dx + dz * dz <= r.r * r.r) return true;
+            }
+        }
+        return false;
+    }
+
+    private int reservedHeightAt(int wx, int wz, int def) {
+        synchronized (reservedFlats) {
+            for (Reserve r : reservedFlats) {
+                int dx = wx - r.x, dz = wz - r.z;
+                if (dx * dx + dz * dz <= r.r * r.r) return r.y;
+            }
+        }
+        return def;
+    }
+
+    private void reserveFlatArea(Location center, int y, int radius) {
+        synchronized (reservedFlats) { reservedFlats.add(new Reserve(center.getBlockX(), center.getBlockZ(), y, radius)); }
     }
 
 
@@ -1103,41 +1141,56 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             for (int lz = 0; lz < 16; lz++) {
                 int wx = chunkBaseX + lx; int wz = chunkBaseZ + lz;
 
-                // Use multi-noise surface height
-                int finalSurf = (int) Math.floor(Math.max(150, Math.min(surf[lx][lz], worldMaxY)));
+                // If this column is inside a reserved flat (e.g., bungalow pad), force its surface
+                int reservedY = reservedHeightAt(wx, wz, Integer.MIN_VALUE);
+                if (reservedY != Integer.MIN_VALUE) {
+                    surf[lx][lz] = Math.max(150, Math.min(reservedY, worldMaxY));
+                }
 
                 // Ocean/mountain logic using smoothed mask
                 double oceanFactor = oceanMask[lx][lz]; // 0..1
                 boolean isOcean = oceanFactor >= 0.5;
 
+                // Treat shoreline as hill-immune band
+                boolean nearShore = (oceanFactor > 0.40 && oceanFactor < 0.75);
+                // If near shore, don't apply the ring/hill blending; clamp to sea level if above it
+                if (nearShore && surf[lx][lz] > OCEAN_SEA_LEVEL) {
+                    surf[lx][lz] = OCEAN_SEA_LEVEL;
+                }
+
+                // Use multi-noise surface height
+                int finalSurf = (int) Math.floor(Math.max(150, Math.min(surf[lx][lz], worldMaxY)));
+
                 // Inverted ring blending (applies only for surfaces between Y 155..200):
                 // peak/slope (near) -> hills -> plains -> hills (far)
                 double distPeak = distanceToNearestPeak(seed, wx, wz, 16); // search ~256 blocks radius
-                if (Double.isFinite(distPeak) && finalSurf >= 155 && finalSurf <= 200) {
-                    double rSlope = 80.0;   // inside this: keep peak/slope as-is
-                    double rHill = 140.0;   // inner hills ring ends here
-                    double rPlains = 220.0; // plains band ends here; beyond becomes outer hills
-                    if (distPeak > rSlope && distPeak <= rHill) {
-                        // Inner hills ring: add gentle hills that fade out toward rHill
-                        double t = (distPeak - rSlope) / (rHill - rSlope);
-                        double s = 1.0 - fade(Math.max(0.0, Math.min(1.0, t))); // 1 near rSlope -> 0 at rHill
-                        double n = fbm2(seed ^ 0x1A1B551L, wx * 0.02, wz * 0.02); // [0,1]
-                        int delta = (int) Math.round((n - 0.5) * 20.0 * s); // up to Â±10 scaled
-                        finalSurf = Math.max(150, Math.min(worldMaxY, finalSurf + delta));
-                    } else if (distPeak > rHill && distPeak <= rPlains) {
-                        // Plains band: blend toward ~156, strongest at mid-band
-                        double t = (distPeak - rHill) / (rPlains - rHill); // 0..1 across band
-                        double s = fade(Math.max(0.0, Math.min(1.0, t)));
-                        int plainsHeight = 156;
-                        double blended = finalSurf * (1.0 - s) + plainsHeight * s;
-                        finalSurf = (int) Math.round(blended);
-                    } else if (distPeak > rPlains) {
-                        // Outer hills ring: add gentle hills that fade in beyond plains band
-                        double t = Math.min(1.0, (distPeak - rPlains) / 100.0);
-                        double s = fade(Math.max(0.0, t));
-                        double n = fbm2(seed ^ 0x2A1B552L, wx * 0.02, wz * 0.02);
-                        int delta = (int) Math.round((n - 0.5) * 20.0 * (0.5 + 0.5 * s)); // up to Â±10
-                        finalSurf = Math.max(150, Math.min(worldMaxY, finalSurf + delta));
+                if (!nearShore) {
+                    if (Double.isFinite(distPeak) && finalSurf >= 155 && finalSurf <= 200) {
+                        double rSlope = 80.0;   // inside this: keep peak/slope as-is
+                        double rHill = 140.0;   // inner hills ring ends here
+                        double rPlains = 220.0; // plains band ends here; beyond becomes outer hills
+                        if (distPeak > rSlope && distPeak <= rHill) {
+                            // Inner hills ring: add gentle hills that fade out toward rHill
+                            double t = (distPeak - rSlope) / (rHill - rSlope);
+                            double s = 1.0 - fade(Math.max(0.0, Math.min(1.0, t))); // 1 near rSlope -> 0 at rHill
+                            double n = fbm2(seed ^ 0x1A1B551L, wx * 0.02, wz * 0.02); // [0,1]
+                            int delta = (int) Math.round((n - 0.5) * 20.0 * s); // up to ±10 scaled
+                            finalSurf = Math.max(150, Math.min(worldMaxY, finalSurf + delta));
+                        } else if (distPeak > rHill && distPeak <= rPlains) {
+                            // Plains band: blend toward ~156, strongest at mid-band
+                            double t = (distPeak - rHill) / (rPlains - rHill); // 0..1 across band
+                            double s = fade(Math.max(0.0, Math.min(1.0, t)));
+                            int plainsHeight = 156;
+                            double blended = finalSurf * (1.0 - s) + plainsHeight * s;
+                            finalSurf = (int) Math.round(blended);
+                        } else if (distPeak > rPlains) {
+                            // Outer hills ring: add gentle hills that fade in beyond plains band
+                            double t = Math.min(1.0, (distPeak - rPlains) / 100.0);
+                            double s = fade(Math.max(0.0, t));
+                            double n = fbm2(seed ^ 0x2A1B552L, wx * 0.02, wz * 0.02);
+                            int delta = (int) Math.round((n - 0.5) * 20.0 * (0.5 + 0.5 * s)); // up to ±10
+                            finalSurf = Math.max(150, Math.min(worldMaxY, finalSurf + delta));
+                        }
                     }
                 }
                 if (finalSurf < 150) continue;
@@ -1241,6 +1294,13 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         }
                     }
 
+                    // Guarantee sand at the shoreline: top solid under water is sand within 6 blocks of shore
+                    if (oceanMask[lx][lz] < 0.70) {
+                        int y = Math.min(OCEAN_SEA_LEVEL - 1, worldMaxY);
+                        while (y >= 140 && data.getType(lx, y, lz) == Material.WATER) y--;
+                        if (y >= 140 && data.getType(lx, y, lz) != Material.AIR) data.setBlock(lx, y, lz, Material.SAND);
+                    }
+
                     // Biomes: beach near shore, ocean deeper offshore
                     try {
                         if (over < 12) biome.setBiome(lx, lz, Biome.BEACH);
@@ -1322,6 +1382,24 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                 else biome.setBiome(lx, lz, Biome.SNOWY_TAIGA);
                             } catch (Throwable ignore) {}
                         }
+                    }
+
+                    // Edge-touch rule: if any 4-neighbor at sea level is water, make this top ≤ sea level sand
+                    boolean waterAdj = false;
+                    if (OCEAN_SEA_LEVEL >= 0 && OCEAN_SEA_LEVEL <= worldMaxY) {
+                        int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+                        for (int[] d : dirs) {
+                            int nx = lx + d[0], nz = lz + d[1];
+                            if (nx<0||nx>15||nz<0||nz>15) continue;
+                            try { if (data.getType(nx, OCEAN_SEA_LEVEL, nz) == Material.WATER) { waterAdj = true; break; } }
+                            catch (Throwable ignore) {}
+                        }
+                    }
+                    if (waterAdj) {
+                        int y = Math.min(finalSurf, OCEAN_SEA_LEVEL);
+                        data.setBlock(lx, y, lz, Material.SAND);
+                        for (int i = 1; i <= 3 && y-i >= 150; i++) data.setBlock(lx, y - i, lz, Material.SAND);
+                        try { biome.setBiome(lx, lz, Biome.BEACH); } catch (Throwable ignore) {}
                     }
 
                     // Cleanup: prevent stone from existing above any sand in this land column
