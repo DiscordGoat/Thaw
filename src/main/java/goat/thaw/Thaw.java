@@ -30,8 +30,12 @@ import goat.thaw.subsystems.oxygen.OxygenManager;
 import org.bukkit.scheduler.BukkitRunnable;
 
 import java.util.*;
+import goat.thaw.system.dev.BungalowLootManager;
 
 public final class Thaw extends JavaPlugin {
+
+    private static Thaw instance; // static reference
+
 
     private SidebarManager sidebarManager;
     private StatsManager statsManager;
@@ -49,6 +53,7 @@ public final class Thaw extends JavaPlugin {
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
     private SchemManager schematicManager;
+    private BungalowLootManager lootManager;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
             "fire",
             "scholar",
@@ -58,9 +63,12 @@ public final class Thaw extends JavaPlugin {
             "pacifist"
             // add more when you create them
     );
-
+    public static Thaw getInstance() {
+        return instance;
+    }
     @Override
     public void onEnable() {
+        instance = this; // set reference on plugin enable
 
         // getServer().getPluginManager().registerEvents(new ResourcePackListener(), this);
 
@@ -75,6 +83,8 @@ public final class Thaw extends JavaPlugin {
 
         // Schematic system
         schematicManager = new SchemManager(this);
+        lootManager = new BungalowLootManager();
+        
         if (getCommand("testschem") != null) {
             getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
         }
@@ -205,7 +215,13 @@ public final class Thaw extends JavaPlugin {
                     Random rng = new Random();
                     String chosen = BUNGALOW_SCHEMATICS.get(rng.nextInt(BUNGALOW_SCHEMATICS.size()));
 
+                    // Place the structure
                     schematicManager.placeStructure(chosen, loc);
+                    
+                    // Populate loot in the bungalow
+                    lootManager.populateLoot(loc, chosen.toUpperCase());
+                    
+                    // Register the bungalow
                     gen.registerBungalow(loc);
 
                 }
