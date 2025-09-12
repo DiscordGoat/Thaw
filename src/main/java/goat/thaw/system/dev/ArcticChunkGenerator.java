@@ -556,6 +556,13 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Gate the whole boulder pass (40% chance per chunk)
         if (rng.nextDouble() >= 0.4) return;
 
+        // Check if this chunk contains a bungalow
+        for (Location bungalowLoc : placedBungalows) {
+            if (bungalowLoc.getChunk().getX() == chunkX && bungalowLoc.getChunk().getZ() == chunkZ) {
+                return; // Skip boulder generation in chunks with bungalows
+            }
+        }
+
         // Track placed boulder centers within this chunk to enforce spacing
         java.util.ArrayList<int[]> placedCenters = new java.util.ArrayList<>();
 
