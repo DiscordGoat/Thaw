@@ -35,6 +35,9 @@ import goat.thaw.system.capsule.CapsuleRegistry;
 import goat.thaw.system.capsule.CapsuleLootManager;
 import goat.thaw.subsystems.eyespy.EyeSpyManager;
 import goat.thaw.system.WolfSpawnListener;
+import goat.thaw.system.monument.MonumentListener;
+import goat.thaw.system.monument.MonumentManager;
+import goat.thaw.system.monument.MonumentRewardListener;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
@@ -65,6 +68,7 @@ public final class Thaw extends JavaPlugin {
     private SchemManager schematicManager;
     private BungalowLootManager lootManager;
     private CapsuleLootManager capsuleLootManager;
+    private MonumentManager monumentManager;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
             "fire",
             "scholar",
@@ -103,6 +107,11 @@ public final class Thaw extends JavaPlugin {
         }
         lootManager = new BungalowLootManager();
         capsuleLootManager = new CapsuleLootManager();
+
+        monumentManager = new MonumentManager(this);
+        monumentManager.load();
+        getServer().getPluginManager().registerEvents(new MonumentListener(monumentManager), this);
+        getServer().getPluginManager().registerEvents(new MonumentRewardListener(this, monumentManager), this);
         
         if (getCommand("testschem") != null) {
             getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
