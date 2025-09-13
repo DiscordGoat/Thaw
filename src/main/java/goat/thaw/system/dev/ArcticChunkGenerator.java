@@ -81,6 +81,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
+    public final List<Location> capsuleQueue = Collections.synchronizedList(new ArrayList<>());
     private static ArcticChunkGenerator instance;
 
     public ArcticChunkGenerator() {
@@ -1803,16 +1804,23 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                     }
                                 }
                             }
-                            // Dent connection at worm end toward nearest air
-                            if (res != null && res.y <= 165)
-                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null) {
+                                queueCapsule(world, res, chunkX, chunkZ);
+                                if (res.y <= 165) {
+                                    dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                                }
+                            }
                         }
                         case CHAOS_TUNNEL -> {
                             // Widened and lengthened chaos tunnels
                             StepResult res = carveWorm(data, rr, t, chunkBaseX, chunkBaseZ, yMin, yMax,
                                     1.9, 1.5, 6.5, false, false);
-                            if (res != null && res.y <= 165)
-                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null) {
+                                queueCapsule(world, res, chunkX, chunkZ);
+                                if (res.y <= 165) {
+                                    dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                                }
+                            }
                         }
                         case ARENA -> {
                             carveArenaAndSpur(data, rr, t, queue, created, MAX_TASKS_PER_REGION, yMin, yMax, chunkBaseX, chunkBaseZ);
@@ -1821,8 +1829,12 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         case STAIRCASE -> {
                             StepResult res = carveWorm(data, rr, t, chunkBaseX, chunkBaseZ, yMin, yMax,
                                     1.5, 1.0, 4.0, true, true);
-                            if (res != null && res.y <= 165)
-                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null) {
+                                queueCapsule(world, res, chunkX, chunkZ);
+                                if (res.y <= 165) {
+                                    dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                                }
+                            }
                         }
                         case OMINOUS_PASSAGE -> {
                             carveOminousPassage(data, rr, t, queue, created, MAX_TASKS_PER_REGION, yMin, yMax, chunkBaseX, chunkBaseZ);
@@ -1831,6 +1843,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     if (created >= MAX_TASKS_PER_REGION) break;
                 }
             }
+        }
+    }
+
+    private void queueCapsule(World world, StepResult res, int chunkX, int chunkZ) {
+        int endChunkX = Math.floorDiv((int) Math.floor(res.x), 16);
+        int endChunkZ = Math.floorDiv((int) Math.floor(res.z), 16);
+        if (endChunkX != chunkX || endChunkZ != chunkZ) return;
+
+        Location loc = new Location(world, Math.floor(res.x), res.y, Math.floor(res.z));
+        synchronized (capsuleQueue) {
+            capsuleQueue.add(loc);
         }
     }
 
