@@ -31,11 +31,6 @@ public class CapsuleLootManager {
         brown.add(Material.CHORUS_FRUIT, 1, 2, 1);
         lootPopulators.put("BROWN", brown);
 
-        SimpleLootPopulator light_gray = new SimpleLootPopulator();
-        light_gray.add(Material.AMETHYST_SHARD, 2, 8, 5);
-        light_gray.add(Material.PURPLE_DYE, 1, 4, 3);
-        light_gray.add(Material.CHORUS_FRUIT, 1, 2, 1);
-        lootPopulators.put("LIGHT_GRAY", light_gray);
 
         SimpleLootPopulator green = new SimpleLootPopulator();
         green.add(Material.AMETHYST_SHARD, 2, 8, 5);
