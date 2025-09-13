@@ -41,6 +41,7 @@ import goat.thaw.system.monument.MonumentManager;
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
 import goat.thaw.system.dev.ToggleEffectsCommand;
+import goat.thaw.system.enchanting.EnchantingManager;
 
 public final class Thaw extends JavaPlugin {
 
@@ -68,6 +69,7 @@ public final class Thaw extends JavaPlugin {
     private BungalowLootManager lootManager;
     private CapsuleLootManager capsuleLootManager;
     private MonumentManager monumentManager;
+    private EnchantingManager enchantingManager;
     private boolean ctmGenerated = false;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
             "fire",
@@ -202,6 +204,10 @@ public final class Thaw extends JavaPlugin {
         // Eye Spy: nocturnal tracking eye
         eyeSpyManager = new EyeSpyManager(this);
         eyeSpyManager.start();
+
+        // Enchanting: custom table logic
+        enchantingManager = new EnchantingManager(this);
+        enchantingManager.start();
 
         // Tablist: condition overview segments + world pop
         tablistManager = new TablistManager(this, statsManager, populationManager, effectManager, oxygenManager);
