@@ -264,6 +264,20 @@ public final class Thaw extends JavaPlugin {
 
                 }
 
+                Location ctmLoc = null;
+                synchronized (gen.ctmQueue) {
+                    if (!gen.ctmQueue.isEmpty()) {
+                        ctmLoc = gen.ctmQueue.remove(0);
+                    }
+                }
+
+                if (ctmLoc != null && !gen.isCtmPlaced()) {
+                    if (isValidCapsuleLocation(ctmLoc)) {
+                        schematicManager.placeStructure("ctm", ctmLoc);
+                        gen.markCtmPlaced();
+                    }
+                }
+
                 List<Location> capsules;
                 synchronized (gen.capsuleQueue) {
                     capsules = new ArrayList<>(gen.capsuleQueue);
