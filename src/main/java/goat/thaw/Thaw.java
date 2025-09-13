@@ -29,6 +29,8 @@ import goat.thaw.system.logging.DiceLogger;
 import goat.thaw.system.effects.EffectManager;
 import goat.thaw.subsystems.oxygen.OxygenManager;
 import org.bukkit.scheduler.BukkitRunnable;
+import goat.thaw.system.capsule.CapsuleRegistry;
+import goat.thaw.system.capsule.CapsuleGolemListener;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
@@ -82,6 +84,7 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpaceEventListener(spaceManager, this), this);
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new FirstJoinListener(this), this);
+        getServer().getPluginManager().registerEvents(new CapsuleGolemListener(), this);
         getCommand("locateBungalows").setExecutor(new LocateBungalowsCommand());
 
         // Schematic system
@@ -220,7 +223,6 @@ public final class Thaw extends JavaPlugin {
                     Bukkit.getLogger().info("[Thaw] Placing " + toPlace.size() + " bungalows...");
                 }
 
-
                 for (Location loc : toPlace) {
                     Random rng = new Random();
                     String chosen = BUNGALOW_SCHEMATICS.get(rng.nextInt(BUNGALOW_SCHEMATICS.size()));
@@ -234,6 +236,19 @@ public final class Thaw extends JavaPlugin {
                     // Register the bungalow
                     gen.registerBungalow(loc);
 
+                }
+
+                List<Location> capsules;
+                synchronized (gen.capsuleQueue) {
+                    capsules = new ArrayList<>(gen.capsuleQueue);
+                    gen.capsuleQueue.clear();
+                }
+
+                for (Location loc : capsules) {
+                    String schem = CapsuleRegistry.random();
+                    if (schem != null) {
+                        schematicManager.placeStructure(schem, loc);
+                    }
                 }
             }, 200L, 200L);
         });
