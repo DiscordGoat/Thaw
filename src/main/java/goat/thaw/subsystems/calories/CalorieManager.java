@@ -219,15 +219,15 @@ public class CalorieManager implements Listener {
             case RABBIT: return 150.0; // Raw Rabbit
             case COOKED_RABBIT: return 350.0;
             case RABBIT_STEW: return 600.0; // Hearty stew bonus
-            case COD: return 120.0; // Raw Cod
-            case COOKED_COD: return 250.0;
-            case SALMON: return 120.0; // Raw Salmon
-            case COOKED_SALMON: return 250.0;
-            case TROPICAL_FISH: return 100.0;
+            case COD: return 50.0; // Raw Cod
+            case COOKED_COD: return 100.0;
+            case SALMON: return 50.0; // Raw Salmon
+            case COOKED_SALMON: return 100.0;
+            case TROPICAL_FISH: return 500.0;
             case PUFFERFISH: return 50.0; // Dangerous but calories
 
             // Farm Foods
-            case BREAD: return 250.0;
+            case BREAD: return 500.0;
             case COOKIE: return 80.0;
             case CARROT: return 80.0;
             case GOLDEN_CARROT: return 500.0; // Buffed
