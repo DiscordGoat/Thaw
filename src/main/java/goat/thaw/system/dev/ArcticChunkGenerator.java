@@ -82,6 +82,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> capsuleQueue = Collections.synchronizedList(new ArrayList<>());
+    public final List<Location> ctmQueue = Collections.synchronizedList(new ArrayList<>());
+    private boolean ctmQueued = false;
     private static ArcticChunkGenerator instance;
 
     public ArcticChunkGenerator() {
@@ -1806,6 +1808,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                             }
                             if (res != null) {
                                 queueCapsule(world, res, chunkX, chunkZ);
+                                queueCtm(world, res, chunkX, chunkZ);
                                 if (res.y <= 165) {
                                     dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                                 }
@@ -1817,6 +1820,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                     1.9, 1.5, 6.5, false, false);
                             if (res != null) {
                                 queueCapsule(world, res, chunkX, chunkZ);
+                                queueCtm(world, res, chunkX, chunkZ);
                                 if (res.y <= 165) {
                                     dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                                 }
@@ -1831,6 +1835,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                     1.5, 1.0, 4.0, true, true);
                             if (res != null) {
                                 queueCapsule(world, res, chunkX, chunkZ);
+                                queueCtm(world, res, chunkX, chunkZ);
                                 if (res.y <= 165) {
                                     dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                                 }
@@ -1855,6 +1860,19 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         synchronized (capsuleQueue) {
             capsuleQueue.add(loc);
         }
+    }
+
+    private void queueCtm(World world, StepResult res, int chunkX, int chunkZ) {
+        if (ctmQueued) return;
+        int endChunkX = Math.floorDiv((int) Math.floor(res.x), 16);
+        int endChunkZ = Math.floorDiv((int) Math.floor(res.z), 16);
+        if (endChunkX != chunkX || endChunkZ != chunkZ) return;
+
+        Location loc = new Location(world, Math.floor(res.x), res.y, Math.floor(res.z));
+        synchronized (ctmQueue) {
+            ctmQueue.add(loc);
+        }
+        ctmQueued = true;
     }
 
     private CaveType pickIntersector(Random rr) {
