@@ -7,6 +7,9 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.World;
+import org.bukkit.Particle;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.type.EndPortalFrame;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -14,6 +17,8 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.block.Action;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -23,6 +28,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.profile.PlayerProfile;
 import org.bukkit.profile.PlayerTextures;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.scheduler.BukkitRunnable;
 
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +36,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import java.util.List;
+import java.util.ArrayList;
 
 public class EyeSpyManager implements Listener {
     private static final double EYE_Y = 300.0;
@@ -123,6 +131,26 @@ public class EyeSpyManager implements Listener {
     }
 
     @EventHandler
+    public void onPlayerPlaceEye(PlayerInteractEvent e) {
+        if (e.getAction() != Action.RIGHT_CLICK_BLOCK) return;
+        if (e.getClickedBlock() == null) return;
+        if (e.getClickedBlock().getType() != Material.END_PORTAL_FRAME) return;
+        ItemStack item = e.getItem();
+        if (item == null || item.getType() != Material.ENDER_EYE) return;
+        Block block = e.getClickedBlock();
+        EndPortalFrame frame = (EndPortalFrame) block.getBlockData();
+        if (frame.hasEye()) return;
+        Player player = e.getPlayer();
+        Location loc = block.getLocation();
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            EndPortalFrame newFrame = (EndPortalFrame) block.getBlockData();
+            if (!newFrame.hasEye()) return;
+            spawnFallingEye(loc, player);
+            checkAndActivatePortal(loc);
+        }, 1L);
+    }
+
+    @EventHandler
     public void onDamage(EntityDamageByEntityEvent e) {
         Entity entity = e.getEntity();
         if (!(entity instanceof ArmorStand stand)) return;
@@ -147,6 +175,82 @@ public class EyeSpyManager implements Listener {
         w.dropItemNaturally(damager.getLocation(), new ItemStack(Material.ENDER_EYE));
         stand.remove();
         eyes.remove(owner);
+    }
+
+    private void checkAndActivatePortal(Location frameLoc) {
+        List<Block> frames = getFramesWithEyes(frameLoc);
+        if (frames.size() < 12) return;
+        World world = frameLoc.getWorld();
+        if (world == null) return;
+        int minX = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+        for (Block b : frames) {
+            int x = b.getX();
+            int z = b.getZ();
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (z < minZ) minZ = z;
+            if (z > maxZ) maxZ = z;
+        }
+        int centerX = (minX + maxX) / 2;
+        int centerZ = (minZ + maxZ) / 2;
+        int y = frameLoc.getBlockY();
+        for (int x = centerX - 1; x <= centerX + 1; x++) {
+            for (int z = centerZ - 1; z <= centerZ + 1; z++) {
+                world.getBlockAt(x, y, z).setType(Material.END_PORTAL);
+            }
+        }
+        world.playSound(frameLoc, Sound.BLOCK_END_PORTAL_SPAWN, 1f, 1f);
+    }
+
+    private List<Block> getFramesWithEyes(Location portalLoc) {
+        List<Block> frames = new ArrayList<>();
+        World world = portalLoc.getWorld();
+        if (world == null) return frames;
+        int radius = 5;
+        for (int x = portalLoc.getBlockX() - radius; x <= portalLoc.getBlockX() + radius; x++) {
+            for (int y = portalLoc.getBlockY() - 1; y <= portalLoc.getBlockY() + 1; y++) {
+                for (int z = portalLoc.getBlockZ() - radius; z <= portalLoc.getBlockZ() + radius; z++) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (block.getType() == Material.END_PORTAL_FRAME) {
+                        EndPortalFrame frame = (EndPortalFrame) block.getBlockData();
+                        if (frame.hasEye()) {
+                            frames.add(block);
+                        }
+                    }
+                }
+            }
+        }
+        return frames;
+    }
+
+    private void spawnFallingEye(Location frameLoc, Player player) {
+        Location start = frameLoc.clone().add(0.5, 1.5, 0.5);
+        float yaw = player.getLocation().getYaw() + 180F;
+        start.setYaw(yaw);
+        ArmorStand stand = (ArmorStand) frameLoc.getWorld().spawnEntity(start, EntityType.ARMOR_STAND);
+        stand.setSmall(true);
+        stand.setBasePlate(false);
+        stand.setGravity(false);
+        stand.setVisible(false);
+        stand.setRotation(yaw, 0F);
+        stand.getEquipment().setHelmet(createEyeSkull());
+        new BukkitRunnable() {
+            int ticks = 0;
+            @Override
+            public void run() {
+                if (!stand.isValid()) { cancel(); return; }
+                stand.getWorld().spawnParticle(Particle.DRAGON_BREATH, stand.getLocation(), 5, 0.1, 0.1, 0.1, 0.01);
+                stand.teleport(stand.getLocation().subtract(0, 0.1, 0));
+                ticks++;
+                if (ticks >= 10) {
+                    stand.remove();
+                    cancel();
+                }
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
     }
 
     private ItemStack createEyeSkull() {
