@@ -25,13 +25,25 @@ public class CapsuleLootManager {
     }
 
     private void initializeLootPopulators() {
-        // LILAC capsule
-        SimpleLootPopulator lilac = new SimpleLootPopulator();
-        lilac.add(Material.AMETHYST_SHARD, 2, 8, 5);
-        lilac.add(Material.PURPLE_DYE, 1, 4, 3);
-        lilac.add(Material.CHORUS_FRUIT, 1, 2, 1);
-        lootPopulators.put("LILAC", lilac);
+        SimpleLootPopulator brown = new SimpleLootPopulator();
+        brown.add(Material.AMETHYST_SHARD, 2, 8, 5);
+        brown.add(Material.PURPLE_DYE, 1, 4, 3);
+        brown.add(Material.CHORUS_FRUIT, 1, 2, 1);
+        lootPopulators.put("BROWN", brown);
+
+        SimpleLootPopulator light_gray = new SimpleLootPopulator();
+        light_gray.add(Material.AMETHYST_SHARD, 2, 8, 5);
+        light_gray.add(Material.PURPLE_DYE, 1, 4, 3);
+        light_gray.add(Material.CHORUS_FRUIT, 1, 2, 1);
+        lootPopulators.put("LIGHT_GRAY", light_gray);
+
+        SimpleLootPopulator green = new SimpleLootPopulator();
+        green.add(Material.AMETHYST_SHARD, 2, 8, 5);
+        green.add(Material.PURPLE_DYE, 1, 4, 3);
+        green.add(Material.CHORUS_FRUIT, 1, 2, 1);
+        lootPopulators.put("GREEN", green);
     }
+
 
     /**
      * Searches for nearby chests around the capsule location and populates them
@@ -51,7 +63,7 @@ public class CapsuleLootManager {
                 for (int z = -10; z <= 10; z++) {
                     Block block = structureLocation.clone().add(x, y, z).getBlock();
 
-                    if ((block.getType() == Material.CHEST || block.getType() == Material.TRAPPED_CHEST) && chestsFound < 1) {
+                    if ((block.getType() == Material.CHEST || block.getType() == Material.TRAPPED_CHEST) && chestsFound < 2) {
                         Location chestLoc = block.getLocation();
 
                         Bukkit.getScheduler().runTaskLater(Thaw.getInstance(), () -> {
@@ -66,7 +78,7 @@ public class CapsuleLootManager {
                         chestsFound++;
                     }
 
-                    if (chestsFound >= 1) {
+                    if (chestsFound >= 2) {
                         return;
                     }
                 }

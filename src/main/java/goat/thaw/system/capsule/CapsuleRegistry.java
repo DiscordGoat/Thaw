@@ -38,7 +38,9 @@ public final class CapsuleRegistry {
 
     static {
         // default capsule
-        register("lilac");
+        register("light_gray");
+        register("brown");
+        register("green");
     }
 }
 
