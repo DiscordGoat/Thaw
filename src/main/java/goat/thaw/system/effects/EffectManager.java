@@ -138,6 +138,8 @@ public class EffectManager implements Listener {
             evaluateHypoxia(p);
             // Circumstantial: Hypothermia/Frostbite based on Temperature
             evaluateHypothermia(p);
+            // Circumstantial: Overheated when extremely hot
+            evaluateOverheated(p);
 
             // Timed effects countdown
             Map<EffectId, ActiveEffect> map = active.get(id);
@@ -231,6 +233,17 @@ public class EffectManager implements Listener {
         }
     }
 
+    private void evaluateOverheated(Player p) {
+        StatInstance temp = statsManager.get(p.getUniqueId(), "Temperature");
+        if (temp == null) return;
+        double t = temp.get();
+        if (t >= 190.0) {
+            setCircumstantial(p, EffectId.OVERHEATED, 1);
+        } else {
+            setCircumstantial(p, EffectId.OVERHEATED, 0);
+        }
+    }
+
     private void setCircumstantial(Player p, EffectId id, int level) {
         Map<EffectId, ActiveEffect> map = active.computeIfAbsent(p.getUniqueId(), k -> new EnumMap<>(EffectId.class));
         ActiveEffect current = map.get(id);
@@ -256,6 +269,7 @@ public class EffectManager implements Listener {
             case HYPOXIA -> applyHypoxiaPotions(p, level);
             case HYPOTHERMIA -> applyHypothermiaPotions(p, level);
             case FROSTBITE -> applyFrostbitePotions(p, level);
+            case OVERHEATED -> { /* no potions */ }
         }
     }
 
@@ -264,6 +278,7 @@ public class EffectManager implements Listener {
             case HYPOXIA -> clearHypoxiaPotions(p);
             case HYPOTHERMIA -> clearHypothermiaPotions(p);
             case FROSTBITE -> clearFrostbitePotions(p);
+            case OVERHEATED -> { /* nothing to clear */ }
         }
     }
 
@@ -379,6 +394,7 @@ public class EffectManager implements Listener {
             case HYPOXIA -> "Hypoxia";
             case HYPOTHERMIA -> "Hypothermia";
             case FROSTBITE -> "Frostbite";
+            case OVERHEATED -> "Overheated";
         };
     }
 

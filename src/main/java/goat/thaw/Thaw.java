@@ -24,6 +24,7 @@ import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.plugin.java.JavaPlugin;
 import goat.thaw.subsystems.temperature.DiceManager;
+import goat.thaw.subsystems.temperature.FireTickManager;
 import goat.thaw.system.logging.DiceLogger;
 import goat.thaw.system.effects.EffectManager;
 import goat.thaw.subsystems.oxygen.OxygenManager;
@@ -53,6 +54,7 @@ public final class Thaw extends JavaPlugin {
     private SledManager sledManager;
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
+    private FireTickManager fireTickManager;
     private SchemManager schematicManager;
     private BungalowLootManager lootManager;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
@@ -159,6 +161,10 @@ public final class Thaw extends JavaPlugin {
         effectManager = new EffectManager(this, statsManager);
         effectManager.start();
 
+        // Fire ticks adjust based on temperature
+        fireTickManager = new FireTickManager(this, statsManager);
+        fireTickManager.start();
+
         // Sidebar: live environment HUD with Temperature
         sidebarManager = new SidebarManager(this, statsManager);
         sidebarManager.start();
@@ -247,6 +253,7 @@ public final class Thaw extends JavaPlugin {
         if (diceManager != null) diceManager.stop();
         if (sledManager != null) sledManager.stopAll();
         if (effectManager != null) effectManager.stop();
+        if (fireTickManager != null) fireTickManager.stop();
         if (oxygenManager != null) oxygenManager.stop();
     }
 
