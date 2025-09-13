@@ -82,6 +82,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> placedBungalows = Collections.synchronizedList(new ArrayList<>());
     public final List<Location> capsuleQueue = Collections.synchronizedList(new ArrayList<>());
+    public final List<Location> ctmQueue = Collections.synchronizedList(new ArrayList<>());
+    private boolean ctmPlaced = false;
     private static ArcticChunkGenerator instance;
 
     public ArcticChunkGenerator() {
@@ -96,6 +98,14 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         synchronized (placedBungalows) {
             placedBungalows.add(loc);
         }
+    }
+
+    public boolean isCtmPlaced() {
+        return ctmPlaced;
+    }
+
+    public void markCtmPlaced() {
+        ctmPlaced = true;
     }
 
     private boolean canPlaceBungalow(World world, ChunkData data, int lx, int lz, int wx, int wz) {
@@ -1852,6 +1862,14 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         if (endChunkX != chunkX || endChunkZ != chunkZ) return;
 
         Location loc = new Location(world, Math.floor(res.x), res.y, Math.floor(res.z));
+        if (!ctmPlaced) {
+            synchronized (ctmQueue) {
+                if (!ctmPlaced && ctmQueue.isEmpty()) {
+                    ctmQueue.add(loc);
+                    return;
+                }
+            }
+        }
         synchronized (capsuleQueue) {
             capsuleQueue.add(loc);
         }
