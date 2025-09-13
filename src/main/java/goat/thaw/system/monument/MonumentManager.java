@@ -423,7 +423,7 @@ public class MonumentManager implements Listener {
             logWarning("findSign: base.getWorld() == null");
             return null;
         }
-        int radius = 2;
+        int radius = 1;
         for (int dx = -radius; dx <= radius; dx++) {
             for (int dy = -radius; dy <= radius; dy++) {
                 for (int dz = -radius; dz <= radius; dz++) {

@@ -68,10 +68,13 @@ public enum MonumentType {
     }
 
     public static MonumentType fromId(String id) {
+        if (id == null) return null;
+        String s = id.trim().toUpperCase(Locale.ROOT).replace(' ', '_');
         try {
-            return MonumentType.valueOf(id.toUpperCase(Locale.ROOT));
+            return MonumentType.valueOf(s);
         } catch (IllegalArgumentException ex) {
             return null;
         }
     }
+
 }

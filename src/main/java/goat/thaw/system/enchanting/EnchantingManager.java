@@ -4,8 +4,10 @@ import org.bukkit.*;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.ChiseledBookshelf;
+import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -16,6 +18,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.Vector;
 
 import java.util.*;
 
@@ -73,6 +76,7 @@ public class EnchantingManager implements Listener {
                 List<Block> shelves = findNearbyShelves(tableLoc);
                 if (shelves.isEmpty()) {
                     player.sendMessage(ChatColor.RED + "Requires chiseled bookshelves within 4 blocks.");
+                    e.setCancelled(true);
                     return;
                 }
                 // Start session
@@ -124,7 +128,7 @@ public class EnchantingManager implements Listener {
                     return;
                 }
                 ticks++;
-                session.display.setRotation(session.display.getLocation().getYaw() + 4f, 0f);
+                session.display.setRotation(session.display.getLocation().getYaw() + 12f, 0f);
                 if (ticks % 20 == 0) {
                     consumeRandomBook(session);
                 }
@@ -145,26 +149,65 @@ public class EnchantingManager implements Listener {
         p.playSound(tableLoc, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         session.display.setRotation(0f, 0f);
     }
-
     private void consumeRandomBook(Session session) {
         Collections.shuffle(session.shelves);
         for (Block shelfBlock : session.shelves) {
-            BlockState state = shelfBlock.getState();
-            if (!(state instanceof ChiseledBookshelf shelf)) continue;
+            if (!(shelfBlock.getState() instanceof ChiseledBookshelf shelf)) continue;
+
             Inventory inv = shelf.getInventory();
             List<Integer> occupied = new ArrayList<>();
             for (int i = 0; i < inv.getSize(); i++) {
                 if (inv.getItem(i) != null) occupied.add(i);
             }
             if (occupied.isEmpty()) continue;
+
             int slot = occupied.get(new Random().nextInt(occupied.size()));
-            inv.clear(slot);
+
+            // Remove the book from inventory
+
+
+            // Update blockdata so the texture changes
+            org.bukkit.block.data.type.ChiseledBookshelf data =
+                    (org.bukkit.block.data.type.ChiseledBookshelf) shelfBlock.getBlockData();
+
+            data.setSlotOccupied(slot, false);
+            shelf.getInventory().getItem(slot).setAmount(0);
+
+            shelfBlock.setBlockData(data, true);
             shelf.update();
+
             session.booksConsumed++;
-            // TODO: animate book flying to table
+
+            // Spawn book flying animation
+            animateBookFlight(shelfBlock, session.display.getLocation(), plugin);
+            inv.clear(slot);
             return;
         }
     }
+    private void animateBookFlight(Block from, Location to, JavaPlugin plugin) {
+        Location start = from.getLocation().add(0.5, 1, 0.5);
+        ItemStack bookItem = new ItemStack(Material.BOOK);
+        Item itemEntity = from.getWorld().dropItem(start, bookItem);
+        itemEntity.setPickupDelay(Integer.MAX_VALUE);
+        itemEntity.setGravity(false);
+
+        new BukkitRunnable() {
+            int life = 0;
+            @Override
+            public void run() {
+                if (!itemEntity.isValid() || life > 20) {
+                    itemEntity.remove();
+                    cancel();
+                    return;
+                }
+                Location current = itemEntity.getLocation();
+                Vector dir = to.clone().add(0.5, 1.2, 0.5).toVector().subtract(current.toVector()).normalize().multiply(0.25);
+                itemEntity.setVelocity(dir);
+                life++;
+            }
+        }.runTaskTimer(plugin, 0L, 1L);
+    }
+
 
     private void applyRandomEnchant(ItemStack item, int books) {
         List<Enchantment> possible = Arrays.stream(Enchantment.values())
@@ -178,7 +221,7 @@ public class EnchantingManager implements Listener {
     }
 
     private ArmorStand spawnDisplay(Location table, ItemStack item) {
-        Location loc = table.clone().add(0.5, 1.2, 0.5);
+        Location loc = table.clone().add(0.5, -0.4, 0.5);
         ArmorStand stand = (ArmorStand) table.getWorld().spawnEntity(loc, EntityType.ARMOR_STAND);
         stand.setInvisible(true);
         stand.setGravity(false);
