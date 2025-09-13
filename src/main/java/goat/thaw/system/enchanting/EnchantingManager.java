@@ -173,6 +173,7 @@ public class EnchantingManager implements Listener {
             data.setSlotOccupied(slot, false);
             shelf.getInventory().getItem(slot).setAmount(0);
 
+
             shelfBlock.setBlockData(data, true);
             shelf.update();
 
