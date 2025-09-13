@@ -479,6 +479,7 @@ public class SledManager implements Listener {
             if (idx >= s.dogCount) break;
             Vector pos = fwd.clone().multiply(off[0]).add(right.clone().multiply(off[1]));
             Location base = markerLoc.clone().add(pos.getX(), -1.9, pos.getZ());
+            if (base.getBlock().isLiquid()) continue;
             ArmorStand plat = (ArmorStand) w.spawnEntity(base, EntityType.ARMOR_STAND);
             try { plat.setInvisible(true); } catch (Throwable ignore) {}
             try { plat.setMarker(false); } catch (Throwable ignore) {}
@@ -618,6 +619,7 @@ public class SledManager implements Listener {
             int x = (c.getX() << 4) + random.nextInt(16);
             int z = (c.getZ() << 4) + random.nextInt(16);
             int y = w.getHighestBlockYAt(x, z);
+            if (w.getBlockAt(x, y, z).isLiquid()) return;
             Location loc = new Location(w, x + 0.5, y, z + 0.5);
             try {
                 Wolf wolf = (Wolf) w.spawnEntity(loc, EntityType.WOLF);
