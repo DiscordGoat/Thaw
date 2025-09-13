@@ -85,6 +85,18 @@ public class MonumentManager {
                 int y = ((Number) l.get(1)).intValue();
                 int z = ((Number) l.get(2)).intValue();
                 out.add(new int[]{x, y, z});
+            } else if (o instanceof String s) {
+                // Legacy format: "[x,y,z]"
+                String[] parts = s.replaceAll("\\[|\\]", "").split(",");
+                if (parts.length == 3) {
+                    try {
+                        int x = Integer.parseInt(parts[0].trim());
+                        int y = Integer.parseInt(parts[1].trim());
+                        int z = Integer.parseInt(parts[2].trim());
+                        out.add(new int[]{x, y, z});
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
             }
         }
         return out;
@@ -162,9 +174,9 @@ public class MonumentManager {
             String path = "monuments." + m.getId();
             cfg.set(path + ".center", formatLocation(m.getCenter()));
             cfg.set(path + ".base", formatLocation(m.getBase()));
-            List<String> offs = new ArrayList<>();
+            List<List<Integer>> offs = new ArrayList<>();
             for (int[] o : m.getStationOffsets()) {
-                offs.add("[" + o[0] + "," + o[1] + "," + o[2] + "]");
+                offs.add(Arrays.asList(o[0], o[1], o[2]));
             }
             cfg.set(path + ".stationOffsets", offs);
             if (m.getSign() != null) cfg.set(path + ".sign", formatLocation(m.getSign()));
