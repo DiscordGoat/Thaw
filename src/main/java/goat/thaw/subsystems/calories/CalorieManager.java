@@ -240,6 +240,7 @@ public class CalorieManager implements Listener {
             case MELON_SLICE: return 60.0;
 
             // Fruits & Special
+
             case APPLE: return 150.0;
             case GOLDEN_APPLE: return 800.0; // Buffed
             case ENCHANTED_GOLDEN_APPLE: return 1500.0; // Super food
