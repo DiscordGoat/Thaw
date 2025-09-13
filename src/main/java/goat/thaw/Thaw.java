@@ -31,6 +31,7 @@ import goat.thaw.subsystems.oxygen.OxygenManager;
 import org.bukkit.scheduler.BukkitRunnable;
 import goat.thaw.system.capsule.CapsuleRegistry;
 import goat.thaw.system.capsule.CapsuleGolemListener;
+import goat.thaw.system.capsule.CapsuleLootManager;
 import goat.thaw.subsystems.eyespy.EyeSpyManager;
 
 import java.util.*;
@@ -61,6 +62,7 @@ public final class Thaw extends JavaPlugin {
     private EyeSpyManager eyeSpyManager;
     private SchemManager schematicManager;
     private BungalowLootManager lootManager;
+    private CapsuleLootManager capsuleLootManager;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
             "fire",
             "scholar",
@@ -92,6 +94,7 @@ public final class Thaw extends JavaPlugin {
         // Schematic system
         schematicManager = new SchemManager(this);
         lootManager = new BungalowLootManager();
+        capsuleLootManager = new CapsuleLootManager();
         
         if (getCommand("testschem") != null) {
             getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
@@ -254,6 +257,8 @@ public final class Thaw extends JavaPlugin {
                     String schem = CapsuleRegistry.random();
                     if (schem != null) {
                         schematicManager.placeStructure(schem, loc);
+                        String type = schem.toUpperCase();
+                        Bukkit.getScheduler().runTaskLater(this, () -> capsuleLootManager.populateLoot(loc, type), 20L);
                     }
                 }
             }, 200L, 200L);
