@@ -1,16 +1,7 @@
 package goat.thaw.system.dev;
 
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
-import org.bukkit.Chunk;
-import org.bukkit.entity.ArmorStand;
-import org.bukkit.entity.Boat;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-import org.bukkit.entity.Player;
-import org.bukkit.entity.Wolf;
+import org.bukkit.*;
+import org.bukkit.entity.*;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerQuitEvent;
@@ -21,6 +12,8 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.vehicle.VehicleExitEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.potion.PotionEffect;
+import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitTask;
 import org.bukkit.util.Vector;
 import org.bukkit.inventory.EquipmentSlot;
@@ -85,7 +78,7 @@ public class SledManager implements Listener {
         int bx = base.getBlockX();
         int bz = base.getBlockZ();
         int by = w.getHighestBlockYAt(bx, bz);
-        double clearance = 1.2; // meters above ground to avoid friction
+        double clearance = 1.1; // meters above ground to avoid friction
         Location boatLoc = new Location(w, bx + 0.5, by + clearance, bz + 0.5, base.getYaw(), base.getPitch());
         // Spawn a boat and mount player
         Boat boat = (Boat) w.spawnEntity(boatLoc, EntityType.BOAT);
@@ -242,7 +235,7 @@ public class SledManager implements Listener {
         boolean targetBelow = targetHoverY < boatLoc.getY() - 1e-3;
         if (targetBelow) {
             if (!s.descentArmed && s.descendDelayTicks <= 0) {
-                s.descendDelayTicks = 30; // ~1.5s delay
+                s.descendDelayTicks = 15; // ~1.5s delay
                 s.descentArmed = true;
             }
         } else {
@@ -393,11 +386,11 @@ public class SledManager implements Listener {
     }
 
     private double hoverYAt(World w, int x, int z) {
-        double base = surfaceTopY(w, x, z) + 0.3; // base hover
+        double base = surfaceTopY(w, x, z) + 0.1; // base hover
         try {
             int yBase = w.getHighestBlockYAt(x, z);
             Block above = w.getBlockAt(x, yBase + 1, z);
-            if (above.getType() == Material.SNOW) base += 0.2; // layered snow bonus
+            if (above.getType() == Material.SNOW) base += 0.1; // layered snow bonus
         } catch (Throwable ignore) {}
         return base;
     }
@@ -477,9 +470,9 @@ public class SledManager implements Listener {
         if (s.dogCount <= 1) {
             OFFSETS = new double[][]{ {-2.2, 0.0} };
         } else if (s.dogCount <= 2) {
-            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+            OFFSETS = new double[][]{ {-2.6, -0.7}, {-2.6, 0.7} };
         } else {
-            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7} };
+            OFFSETS = new double[][]{ {-2.6, -0.7}, {-2.6, 0.7}, {-1.5, -0.7}, {-1.5, 0.7} };
         }
         int idx = 0;
         for (double[] off : OFFSETS) {
@@ -538,9 +531,9 @@ public class SledManager implements Listener {
         if (s.dogCount <= 1) {
             OFFSETS = new double[][]{ {-2.2, 0.0} };
         } else if (s.dogCount <= 2) {
-            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7} };
+            OFFSETS = new double[][]{ {-2.6, -0.7}, {-2.6, 0.7} };
         } else {
-            OFFSETS = new double[][]{ {-2.2, -0.7}, {-2.2, 0.7}, {-3.4, -0.7}, {-3.4, 0.7} };
+            OFFSETS = new double[][]{ {-2.6, -0.7}, {-2.6, 0.7}, {-1.5, -0.7}, {-1.5, 0.7} };
         }
         World w = boatLoc.getWorld();
         // Move lead holder to marker plane (keeps rope length short and consistent)
@@ -619,14 +612,92 @@ public class SledManager implements Listener {
 
     @EventHandler
     public void onChunkLoad(ChunkLoadEvent e) {
-        if (random.nextDouble() < 0.0005) { // extremely rare
+        if (random.nextDouble() < 0.05) { // extremely rare
             Chunk c = e.getChunk();
             World w = c.getWorld();
             int x = (c.getX() << 4) + random.nextInt(16);
             int z = (c.getZ() << 4) + random.nextInt(16);
             int y = w.getHighestBlockYAt(x, z);
             Location loc = new Location(w, x + 0.5, y, z + 0.5);
-            try { w.spawnEntity(loc, EntityType.WOLF); } catch (Throwable ignore) {}
+            try {
+                Wolf wolf = (Wolf) w.spawnEntity(loc, EntityType.WOLF);
+                applyWolfVariant(wolf);
+            } catch (Throwable ignore) {}
+        }
+    }
+
+    private void applyWolfVariant(Wolf wolf) {
+        if (wolf == null) return;
+
+        // safety defaults
+        try { wolf.setTamed(false); } catch (Throwable ignored) {}
+        try { wolf.setSilent(true); } catch (Throwable ignored) {}
+        try { wolf.setAI(true); } catch (Throwable ignored) {}
+
+        try {
+            // Weighted selection: BLACK is the rarest (weight 1), others common (weight 10).
+            java.util.LinkedHashMap<Wolf.Variant, Integer> variantWeights = new java.util.LinkedHashMap<>();
+            variantWeights.put(Wolf.Variant.PALE,      10);
+            variantWeights.put(Wolf.Variant.WOODS,     10);
+            variantWeights.put(Wolf.Variant.ASHEN,     10);
+            variantWeights.put(Wolf.Variant.BLACK,      1);  // rarest
+            variantWeights.put(Wolf.Variant.CHESTNUT,  10);
+            variantWeights.put(Wolf.Variant.RUSTY,     10);
+            variantWeights.put(Wolf.Variant.SPOTTED,   10);
+            variantWeights.put(Wolf.Variant.STRIPED,   10);
+            variantWeights.put(Wolf.Variant.SNOWY,     10);
+
+            int total = 0;
+            for (int w : variantWeights.values()) total += w;
+            int pick = random.nextInt(Math.max(1, total));
+            Wolf.Variant chosen = Wolf.Variant.PALE;
+            for (Map.Entry<Wolf.Variant, Integer> e : variantWeights.entrySet()) {
+                pick -= e.getValue();
+                if (pick < 0) { chosen = e.getKey(); break; }
+            }
+
+            // Apply chosen variant
+            try { wolf.setVariant(chosen); } catch (Throwable ignore) {}
+            try {
+                wolf.setCustomNameVisible(true);
+            } catch (Throwable ignore) {}
+
+            // Collar color by variant for flavor
+            try {
+                if (chosen == Wolf.Variant.RUSTY || chosen == Wolf.Variant.SPOTTED || chosen == Wolf.Variant.STRIPED) {
+                    DyeColor[] colors = DyeColor.values();
+                    wolf.setCollarColor(colors[random.nextInt(colors.length)]);
+                } else if (chosen == Wolf.Variant.ASHEN || chosen == Wolf.Variant.SNOWY) {
+                    wolf.setCollarColor(DyeColor.WHITE);
+                } else if (chosen == Wolf.Variant.PALE) {
+                    wolf.setCollarColor(DyeColor.LIGHT_GRAY);
+                } else if (chosen == Wolf.Variant.CHESTNUT) {
+                    wolf.setCollarColor(DyeColor.BROWN);
+                } else if (chosen == Wolf.Variant.WOODS) {
+                    wolf.setCollarColor(DyeColor.GREEN);
+                } else if (chosen == Wolf.Variant.BLACK) {
+                    // Black is special: mark as rare and give permanent Strength I
+                    wolf.setCollarColor(DyeColor.BLACK);
+                    // Give a "permanent" strength boost by applying a very long potion effect.
+                    // amplifier 0 => Strength I
+                    try {
+                        wolf.addPotionEffect(new PotionEffect(PotionEffectType.STRENGTH, Integer.MAX_VALUE, 0, false, false, false));
+                    } catch (Throwable ignore) {}
+                    // make the name reflect rarity
+                    wolf.setCustomNameVisible(true);
+                } else {
+                    wolf.setCollarColor(DyeColor.GRAY);
+                }
+            } catch (Throwable ignore) {}
+
+
+
+            // Keep general behavior settings consistent
+            try { wolf.setInvulnerable(false); } catch (Throwable ignore) {}
+            try { wolf.setAI(true); } catch (Throwable ignore) {}
+
+        } catch (Throwable t) {
+            // fail quietly so chunk load doesn't break
         }
     }
 
@@ -717,5 +788,18 @@ public class SledManager implements Listener {
     public void stopAll() {
         for (UUID id : new java.util.ArrayList<>(sessions.keySet())) stopSledById(id);
         sessions.clear();
+    }
+
+    // helper method (keeps capitalization consistent)
+    private static String capitalize(String s) {
+        if (s == null || s.isEmpty()) return s;
+        String[] parts = s.split(" ");
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.length; i++) {
+            String p = parts[i];
+            sb.append(Character.toUpperCase(p.charAt(0))).append(p.substring(1));
+            if (i < parts.length - 1) sb.append(' ');
+        }
+        return sb.toString();
     }
 }

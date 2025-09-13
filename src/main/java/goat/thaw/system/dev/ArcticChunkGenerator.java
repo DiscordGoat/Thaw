@@ -43,8 +43,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int MOUNTAIN_SEARCH_RADIUS = 224; // how far to look for mountains when computing distance
     private static final int SHORE_JITTER_AMPLITUDE = 12; // +/- amplitude to avoid geometric edges
 
-    private static final int D_CAP = OCEAN_FROM_MOUNTAIN_DIST + OCEAN_COAST_WIDTH + SHORE_JITTER_AMPLITUDE + 8;
-
+    // Distance field configuration
     // Distance field configuration
     private static final int BASE_HALO = 64;
     // halo should at least cover the shoreline distance
@@ -57,11 +56,10 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int CHAMFER_DIAGONAL = 7;    // cost for diagonals
     private static final int CHAMFER_INF = Integer.MAX_VALUE / 4;
 
-    private static final int MAX_COARSE = ((16 + 2 * MAX_HALO) >> 1) + 1;
-    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN_C =
-            ThreadLocal.withInitial(() -> new boolean[MAX_COARSE][MAX_COARSE]);
-    private static final ThreadLocal<int[][]> TL_DIST_C =
-            ThreadLocal.withInitial(() -> new int[MAX_COARSE][MAX_COARSE]);
+    private static final ThreadLocal<boolean[][]> TL_MOUNTAIN =
+            ThreadLocal.withInitial(() -> new boolean[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
+    private static final ThreadLocal<int[][]> TL_DIST =
+            ThreadLocal.withInitial(() -> new int[16 + MAX_HALO * 2][16 + MAX_HALO * 2]);
 
     // --- Bungalows & reserved flats ---
     private static final int MIN_BUNGALOW_DIST = 100;           // already there
@@ -70,8 +68,15 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     private static final class Reserve {
         final int x, z, y, r;
-        Reserve(int x, int z, int y, int r) { this.x = x; this.z = z; this.y = y; this.r = r; }
+
+        Reserve(int x, int z, int y, int r) {
+            this.x = x;
+            this.z = z;
+            this.y = y;
+            this.r = r;
+        }
     }
+
     public final List<Reserve> reservedFlats = Collections.synchronizedList(new ArrayList<>());
 
     public final List<Location> bungalowQueue = Collections.synchronizedList(new ArrayList<>());
@@ -81,6 +86,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     public ArcticChunkGenerator() {
         instance = this;
     }
+
     public static ArcticChunkGenerator getInstance() {
         return instance;
     }
@@ -101,18 +107,21 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         int minY = baseY, maxY = baseY;
         Map<Integer, Integer> heightCounts = new HashMap<>();
 
-        for (int dx = -7; dx <= 7; dx++) for (int dz = -7; dz <= 7; dz++) {
-            int x = (lx + dx) & 15, z = (lz + dz) & 15;
-            int y = getHighestBlockY(data, world, x, z);
-            minY = Math.min(minY, y); maxY = Math.max(maxY, y);
-            heightCounts.merge(y, 1, Integer::sum);
+        for (int dx = -7; dx <= 7; dx++)
+            for (int dz = -7; dz <= 7; dz++) {
+                int x = (lx + dx) & 15, z = (lz + dz) & 15;
+                int y = getHighestBlockY(data, world, x, z);
+                minY = Math.min(minY, y);
+                maxY = Math.max(maxY, y);
+                heightCounts.merge(y, 1, Integer::sum);
 
-            if (y < 154 || y > 158) return false;
-            Material topType = data.getType(x, y, z);
-            if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT)) return false;
-            Material below = data.getType(x, y - 1, z);
-            if (below == Material.WATER || below == Material.SAND) return false;
-        }
+                if (y < 154 || y > 158) return false;
+                Material topType = data.getType(x, y, z);
+                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT))
+                    return false;
+                Material below = data.getType(x, y - 1, z);
+                if (below == Material.WATER || below == Material.SAND) return false;
+            }
 
         if (maxY - minY > 2) return false;
 
@@ -127,30 +136,31 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     }
 
 
-
     private boolean isRegionAnchor(int chunkX, int chunkZ) {
         // Only run on 8×8 chunk anchors
         return (chunkX % 8 == 0) && (chunkZ % 8 == 0);
     }
+
     public Location findBungalowSpot(World world, ChunkData data, int chunkX, int chunkZ) {
         int radius = 4;
         int baseX = (chunkX << 4) + 8, baseZ = (chunkZ << 4) + 8;
 
-        for (int dx = -radius; dx <= radius; dx++) for (int dz = -radius; dz <= radius; dz++) {
-            int wx = baseX + (dx << 4), wz = baseZ + (dz << 4);
-            int lx = wx & 15, lz = wz & 15;
+        for (int dx = -radius; dx <= radius; dx++)
+            for (int dz = -radius; dz <= radius; dz++) {
+                int wx = baseX + (dx << 4), wz = baseZ + (dz << 4);
+                int lx = wx & 15, lz = wz & 15;
 
-            if (!canPlaceBungalow(world, data, lx, lz, wx, wz)) continue;
-            int y = getHighestBlockY(data, world, lx, lz);
-            Location candidate = new Location(world, wx, y, wz);
-            if (!isFarEnough(candidate)) continue;
+                if (!canPlaceBungalow(world, data, lx, lz, wx, wz)) continue;
+                int y = getHighestBlockY(data, world, lx, lz);
+                Location candidate = new Location(world, wx, y, wz);
+                if (!isFarEnough(candidate)) continue;
 
-            // remember a flat reservation (used inside terrain fill)
-            reserveFlatArea(candidate, y, BUNGALOW_RESERVE_RADIUS);
-            // locally flatten right now (covers the current chunk; neighbors will honor the reserve when they gen)
-            flattenForBungalowNow(data, world, lx, lz, y, BUNGALOW_RESERVE_RADIUS);
-            return candidate;
-        }
+                // remember a flat reservation (used inside terrain fill)
+                reserveFlatArea(candidate, y, BUNGALOW_RESERVE_RADIUS);
+                // locally flatten right now (covers the current chunk; neighbors will honor the reserve when they gen)
+                flattenForBungalowNow(data, world, lx, lz, y, BUNGALOW_RESERVE_RADIUS);
+                return candidate;
+            }
         return null;
     }
 
@@ -169,15 +179,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     private void flattenForBungalowNow(ChunkData data, World world, int cx, int cz, int y, int r) {
         int yTop = Math.min(world.getMaxHeight() - 1, AUDIT_Y_MAX);
-        for (int dx = -r; dx <= r; dx++) for (int dz = -r; dz <= r; dz++) {
-            int lx = cx + dx, lz = cz + dz; if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
-            if (dx * dx + dz * dz > r * r) continue;
-            for (int yy = 150; yy <= yTop; yy++) {
-                if (yy < y) data.setBlock(lx, yy, lz, Material.DIRT);
-                else if (yy == y) data.setBlock(lx, yy, lz, Material.SNOW_BLOCK);
-                else data.setBlock(lx, yy, lz, Material.AIR);
+        for (int dx = -r; dx <= r; dx++)
+            for (int dz = -r; dz <= r; dz++) {
+                int lx = cx + dx, lz = cz + dz;
+                if (lx < 0 || lx > 15 || lz < 0 || lz > 15) continue;
+                if (dx * dx + dz * dz > r * r) continue;
+                for (int yy = 150; yy <= yTop; yy++) {
+                    if (yy < y) data.setBlock(lx, yy, lz, Material.DIRT);
+                    else if (yy == y) data.setBlock(lx, yy, lz, Material.SNOW_BLOCK);
+                    else data.setBlock(lx, yy, lz, Material.AIR);
+                }
             }
-        }
     }
 
 
@@ -218,13 +230,13 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // 7) Structures (emerald slabs) after carving; air-exposed
         // bungalow logic only for region anchors
         if (isRegionAnchor(chunkX, chunkZ)) {
-            Bukkit.getLogger().info("[Bungalow] Checking region anchor ("+chunkX+","+chunkZ+")");
+            Bukkit.getLogger().info("[Bungalow] Checking region anchor (" + chunkX + "," + chunkZ + ")");
             Location spot = findBungalowSpot(world, data, chunkX, chunkZ);
             if (spot != null) {
                 synchronized (bungalowQueue) {
                     bungalowQueue.add(spot);
                 }
-                Bukkit.getLogger().info("[Bungalow] Added bungalow to queue at "+spot);
+                Bukkit.getLogger().info("[Bungalow] Added bungalow to queue at " + spot);
             }
         }
 
@@ -240,6 +252,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         return data;
     }
+
     // Safe alternative to world.getHighestBlockYAt, works on in-progress ChunkData
     private int getHighestBlockY(ChunkData data, World world, int lx, int lz) {
         int yTop = Math.min(world.getMaxHeight() - 1, AUDIT_Y_MAX);
@@ -256,13 +269,18 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private boolean hasWaterNearby(ChunkData data, World world, int lx, int lz, int radius, int yMin, int yMax) {
         int r2 = radius * radius;
         for (int dx = -radius; dx <= radius; dx++) {
-            int x = lx + dx; if (x < 0 || x > 15) continue;
+            int x = lx + dx;
+            if (x < 0 || x > 15) continue;
             int dx2 = dx * dx;
             for (int dz = -radius; dz <= radius; dz++) {
                 if (dx2 + dz * dz > r2) continue;
-                int z = lz + dz; if (z < 0 || z > 15) continue;
+                int z = lz + dz;
+                if (z < 0 || z > 15) continue;
                 for (int y = yMin; y <= yMax; y++) {
-                    try { if (data.getType(x, y, z) == Material.WATER) return true; } catch (Throwable ignore) {}
+                    try {
+                        if (data.getType(x, y, z) == Material.WATER) return true;
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }
@@ -290,9 +308,10 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     }
 
     private void reserveFlatArea(Location center, int y, int radius) {
-        synchronized (reservedFlats) { reservedFlats.add(new Reserve(center.getBlockX(), center.getBlockZ(), y, radius)); }
+        synchronized (reservedFlats) {
+            reservedFlats.add(new Reserve(center.getBlockX(), center.getBlockZ(), y, radius));
+        }
     }
-
 
 
     private void placeBedrock(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
@@ -357,8 +376,14 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         z += Math.sin(yaw) * stepLen;
                         y += (int) Math.round(Math.sin(pitch));
 
-                        if (y < yMin + 1) { y = yMin + 1; pitch = Math.abs(pitch) * 0.5; }
-                        if (y > yMax - 1) { y = yMax - 1; pitch = -Math.abs(pitch) * 0.5; }
+                        if (y < yMin + 1) {
+                            y = yMin + 1;
+                            pitch = Math.abs(pitch) * 0.5;
+                        }
+                        if (y > yMax - 1) {
+                            y = yMax - 1;
+                            pitch = -Math.abs(pitch) * 0.5;
+                        }
 
                         yaw += (rr.nextDouble() - 0.5) * 0.18;   // slightly steadier direction
                         pitch += (rr.nextDouble() - 0.5) * 0.08; // gentler vertical changes
@@ -389,7 +414,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                     double dx = wx - x;
                                     double dy = wy - y;
                                     double dz = wz - z;
-                                    if ((dx*dx + dy*dy + dz*dz) <= radius * radius) {
+                                    if ((dx * dx + dy * dy + dz * dz) <= radius * radius) {
                                         data.setBlock(lx, wy, lz, Material.AIR);
                                     }
                                 }
@@ -417,7 +442,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                         double dx2 = wx2 - x;
                                         double dy2 = wy2 - y;
                                         double dz2 = wz2 - z;
-                                        if ((dx2*dx2 + dy2*dy2 + dz2*dz2) <= roomR * roomR) {
+                                        if ((dx2 * dx2 + dy2 * dy2 + dz2 * dz2) <= roomR * roomR) {
                                             data.setBlock(lx2, wy2, lz2, Material.AIR);
                                         }
                                     }
@@ -435,7 +460,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             try {
                 Material m = data.getType(lx, y, lz);
                 if (m != Material.AIR && m != Material.SNOW) return y;
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+            }
         }
         return -1;
     }
@@ -461,7 +487,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         try {
             Material ground = data.getType(lx, Math.max(0, y - 1), lz);
             if (isLeavesOrLog(ground)) return;
-        } catch (Throwable ignore) {}
+        } catch (Throwable ignore) {
+        }
         // Simple taiga spruce: log column with layered leaf rings
         for (int i = 0; i < height; i++) data.setBlock(lx, y + i, lz, Material.SPRUCE_LOG);
         int top = y + height - 1;
@@ -495,7 +522,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Cluster decision
         double clusterMask = fbm2(seed ^ 0x7AE3C15DL, chunkX * 0.13, chunkZ * 0.13);
         if (clusterMask < 0.55) return; // roughly 45% of chunks
-        int clusters = 1 + (int)Math.floor((clusterMask - 0.55) * 6.0); // 1..3
+        int clusters = 1 + (int) Math.floor((clusterMask - 0.55) * 6.0); // 1..3
         java.util.Random rng = new java.util.Random(hash(seed, chunkX, 77, chunkZ, 0x515EC0DEL));
         for (int c = 0; c < clusters; c++) {
             int cx = rng.nextInt(16), cz = rng.nextInt(16);
@@ -513,11 +540,20 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 if (lx < 1 || lx > 14 || lz < 1 || lz > 14) continue;
                 int y = surfaceY(data, lx, lz, 220);
                 // Prevent trees from generating in ocean/deep ocean biomes
-                try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
-                if (!onPeak) { if (y < 165 || y > 195) continue; } else { if (y < 200 || y > 220) continue; }
+                try {
+                    Biome b = biome.getBiome(lx, lz);
+                    if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue;
+                } catch (Throwable ignore) {
+                }
+                if (!onPeak) {
+                    if (y < 165 || y > 195) continue;
+                } else {
+                    if (y < 200 || y > 220) continue;
+                }
                 Material top = data.getType(lx, y, lz);
                 if (isLeavesOrLog(top)) continue;
-                if (top != Material.GRASS_BLOCK && top != Material.DIRT && top != Material.SNOW_BLOCK && top != Material.STONE) continue;
+                if (top != Material.GRASS_BLOCK && top != Material.DIRT && top != Material.SNOW_BLOCK && top != Material.STONE)
+                    continue;
                 int h = 5 + rng.nextInt(5);
                 placeTreeSpruce(data, lx, y + 1, lz, h);
             }
@@ -528,10 +564,15 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 if (lx >= 1 && lx <= 14 && lz >= 1 && lz <= 14) {
                     int y = surfaceY(data, lx, lz, 220);
                     // Prevent trees from generating in ocean/deep ocean biomes
-                    try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+                    try {
+                        Biome b = biome.getBiome(lx, lz);
+                        if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue;
+                    } catch (Throwable ignore) {
+                    }
                     Material top2 = data.getType(lx, y, lz);
                     if (isLeavesOrLog(top2)) continue;
-                    if ((y >= 165 && y <= 195) || (y >= 205 && y <= 220)) placeTreeSpruce(data, lx, y + 1, lz, 6 + rng.nextInt(3));
+                    if ((y >= 165 && y <= 195) || (y >= 205 && y <= 220))
+                        placeTreeSpruce(data, lx, y + 1, lz, 6 + rng.nextInt(3));
                 }
             }
         }
@@ -542,7 +583,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             int lz = 1 + rng.nextInt(14);
             int y = surfaceY(data, lx, lz, 220);
             // Prevent trees from generating in ocean/deep ocean biomes
-            try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+            try {
+                Biome b = biome.getBiome(lx, lz);
+                if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue;
+            } catch (Throwable ignore) {
+            }
             Material top = data.getType(lx, y, lz);
             if (isLeavesOrLog(top)) continue;
             if (y >= 160 && y <= 175 && slopeAt(data, lx, lz, 220) <= 3) {
@@ -558,13 +603,6 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Gate the whole boulder pass (40% chance per chunk)
         if (rng.nextDouble() >= 0.4) return;
 
-        // Check if this chunk contains a bungalow
-        for (Location bungalowLoc : placedBungalows) {
-            if (bungalowLoc.getChunk().getX() == chunkX && bungalowLoc.getChunk().getZ() == chunkZ) {
-                return; // Skip boulder generation in chunks with bungalows
-            }
-        }
-
         // Track placed boulder centers within this chunk to enforce spacing
         java.util.ArrayList<int[]> placedCenters = new java.util.ArrayList<>();
 
@@ -579,19 +617,24 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             if (y > 165) continue; // plains band ~150..165
             if (slopeAt(data, lx, lz, 220) > 2) continue; // avoid slopes
             // Prevent boulders from generating in ocean/deep ocean biomes
-            try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+            try {
+                Biome b = biome.getBiome(lx, lz);
+                if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue;
+            } catch (Throwable ignore) {
+            }
             // Prevent boulders where the highest block in the column is water
             try {
                 Material topMat = highestNonAir(data, world, lx, lz);
                 if (topMat == Material.WATER) continue;
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+            }
             // Enforce spacing: skip if within 10 blocks of an existing boulder in this chunk
             if (isTooCloseToCenters(placedCenters, lx, lz, 10 * 10)) continue;
             int r = 1 + rng.nextInt(2);
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
                     for (int dy = 0; dy <= r; dy++) {
-                        if (dx*dx + dz*dz + dy*dy > r*r) continue;
+                        if (dx * dx + dz * dz + dy * dy > r * r) continue;
                         int x = lx + dx, z = lz + dz, yy = y + 1 + dy;
                         if (x < 0 || x > 15 || z < 0 || z > 15) continue;
                         Material m = Material.STONE;
@@ -616,18 +659,23 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             if (y < 150 || y > 170) continue; // prefer low, near-shore areas
             if (slopeAt(data, lx, lz, 220) > 2) continue;
             // Prevent boulders from generating in ocean/deep ocean biomes
-            try { Biome b = biome.getBiome(lx, lz); if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue; } catch (Throwable ignore) {}
+            try {
+                Biome b = biome.getBiome(lx, lz);
+                if (b == Biome.OCEAN || b == Biome.DEEP_OCEAN) continue;
+            } catch (Throwable ignore) {
+            }
             // Prevent boulders where the highest block in the column is water
             try {
                 Material topMat = highestNonAir(data, world, lx, lz);
                 if (topMat == Material.WATER) continue;
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+            }
             if (isTooCloseToCenters(placedCenters, lx, lz, 10 * 10)) continue;
             int r = 1 + rng.nextInt(2);
             for (int dx = -r; dx <= r; dx++) {
                 for (int dz = -r; dz <= r; dz++) {
                     for (int dy = 0; dy <= r; dy++) {
-                        if (dx*dx + dz*dz + dy*dy > r*r) continue;
+                        if (dx * dx + dz * dz + dy * dy > r * r) continue;
                         int x = lx + dx, z = lz + dz, yy = y + 1 + dy;
                         if (x < 0 || x > 15 || z < 0 || z > 15) continue;
                         // Majority packed ice, some blue ice
@@ -685,7 +733,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private enum Bias { TOP, BOTTOM, UNIFORM, TRIANGULAR }
+    private enum Bias {TOP, BOTTOM, UNIFORM, TRIANGULAR}
 
     private void oreAttempts(World world, ChunkData data, Random rng, int chunkX, int chunkZ,
                              Material ore, int weight, int minY, int maxY, Bias bias, int peakY, boolean isObsidian) {
@@ -725,7 +773,9 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             // Shuffle order to make forced minimums look natural
             for (int i = positions.length - 1; i > 0; i--) {
                 int j = local.nextInt(i + 1);
-                int[] tmp = positions[i]; positions[i] = positions[j]; positions[j] = tmp;
+                int[] tmp = positions[i];
+                positions[i] = positions[j];
+                positions[j] = tmp;
             }
 
             // Per-block probability: 20% for normal ores, 5% for obsidian
@@ -736,16 +786,28 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 if (local.nextDouble() < p) chosen[i] = true;
             }
             // Enforce min=3
-            int chosenCount = 0; for (boolean b : chosen) if (b) chosenCount++;
-            for (int i = 0; i < 8 && chosenCount < 3; i++) { if (!chosen[i]) { chosen[i] = true; chosenCount++; } }
+            int chosenCount = 0;
+            for (boolean b : chosen) if (b) chosenCount++;
+            for (int i = 0; i < 8 && chosenCount < 3; i++) {
+                if (!chosen[i]) {
+                    chosen[i] = true;
+                    chosenCount++;
+                }
+            }
 
             // Place up to max 8 (all possible) where stone is present
             for (int i = 0; i < 8; i++) {
                 if (!chosen[i]) continue;
-                int lx = positions[i][0]; int ly = positions[i][1]; int lz = positions[i][2];
+                int lx = positions[i][0];
+                int ly = positions[i][1];
+                int lz = positions[i][2];
                 if (ly < yMin || ly > yMax) continue;
                 Material current;
-                try { current = data.getType(lx, ly, lz); } catch (Throwable t) { current = Material.AIR; }
+                try {
+                    current = data.getType(lx, ly, lz);
+                } catch (Throwable t) {
+                    current = Material.AIR;
+                }
                 if (current == Material.STONE) {
                     data.setBlock(lx, ly, lz, ore);
                     placed++;
@@ -893,16 +955,27 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         // Collect anchors (hill centers) from neighboring chunks within influence radius
         int rChunks = (PEAK_INFLUENCE + 15) >> 4; // ceil(radius/16)
-        class Peak { int cx, cz, x, z, h; Peak(int cx,int cz,int x,int z,int h){this.cx=cx;this.cz=cz;this.x=x;this.z=z;this.h=h;} }
+        class Peak {
+            int cx, cz, x, z, h;
+
+            Peak(int cx, int cz, int x, int z, int h) {
+                this.cx = cx;
+                this.cz = cz;
+                this.x = x;
+                this.z = z;
+                this.h = h;
+            }
+        }
         java.util.ArrayList<Peak> peaks = new java.util.ArrayList<>();
         for (int cx = chunkX - rChunks; cx <= chunkX + rChunks; cx++) {
             for (int cz = chunkZ - rChunks; cz <= chunkZ + rChunks; cz++) {
                 if (!hasPeak(seed, cx, cz)) continue;
                 int[] p = peakParams(seed, cx, cz);
-                int px = p[0]; int pz = p[1];
+                int px = p[0];
+                int pz = p[1];
                 // Taller anchors for mountains: 240..300
                 long hh = hash(seed, cx, 4, cz, 0xBEEFC0FEL);
-                int ph = 240 + (int)Math.floor(random01(hh) * 61.0); // 240..300
+                int ph = 240 + (int) Math.floor(random01(hh) * 61.0); // 240..300
                 // If peak center is far beyond influence from this chunk, skip
                 int minWX = chunkBaseX - PEAK_INFLUENCE, maxWX = chunkBaseX + 15 + PEAK_INFLUENCE;
                 int minWZ = chunkBaseZ - PEAK_INFLUENCE, maxWZ = chunkBaseZ + 15 + PEAK_INFLUENCE;
@@ -918,7 +991,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     double dist = 24.0 + random01(ih ^ 0x9E3779B97F4A7C15L) * 72.0; // 24..96
                     int cpx = px + (int) Math.round(Math.cos(angle) * dist);
                     int cpz = pz + (int) Math.round(Math.sin(angle) * dist);
-                    int ch = 200 + (int)Math.floor(random01(ih ^ 0xDEADBEE1L) * 61.0); // 200..260
+                    int ch = 200 + (int) Math.floor(random01(ih ^ 0xDEADBEE1L) * 61.0); // 200..260
                     if (cpx < minWX || cpx > maxWX || cpz < minWZ || cpz > maxWZ) continue;
                     peaks.add(new Peak(cx, cz, cpx, cpz, ch));
                 }
@@ -955,7 +1028,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int wx = chunkBaseX + lx; int wz = chunkBaseZ + lz;
+                int wx = chunkBaseX + lx;
+                int wz = chunkBaseZ + lz;
 
                 // A) Base terrain control
                 double base = 155.0; // local ground reference for this world
@@ -964,7 +1038,10 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 double mountainBand = (low - 0.5) * 2.0; // [-1,1]
                 // Mask for mountain placement (smooth thresholded)
                 double t0 = 0.15, t1 = 0.45; // lower->upper thresholds on band
-                if (longPlains) { t0 -= 0.06; t1 -= 0.06; }
+                if (longPlains) {
+                    t0 -= 0.06;
+                    t1 -= 0.06;
+                }
                 double mask = clamp01((mountainBand - t0) / (t1 - t0));
                 mask = mask * mask; // soften base, stronger near centers
 
@@ -1022,9 +1099,13 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
 
         // Set default biome to snowy mountains for this chunk
-        for (int x = 0; x < 16; x++) for (int z = 0; z < 16; z++) {
-            try { biome.setBiome(x, z, Biome.SNOWY_SLOPES); } catch (Throwable ignore) {}
-        }
+        for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++) {
+                try {
+                    biome.setBiome(x, z, Biome.SNOWY_SLOPES);
+                } catch (Throwable ignore) {
+                }
+            }
 
         // Precompute ocean mask (smoothed) for this chunk
         double[][] distToMtn = computeMountainDistances(world, seed, surf, chunkBaseX, chunkBaseZ, worldMaxY, MOUNTAIN_SEARCH_RADIUS);
@@ -1033,13 +1114,15 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         double[][] oceanMask = new double[16][16];
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int wx = chunkBaseX + lx; int wz = chunkBaseZ + lz;
+                int wx = chunkBaseX + lx;
+                int wz = chunkBaseZ + lz;
                 // Low-frequency shoreline jitter to avoid geometric borders
                 double shoreJitter = (fbm2(seed ^ 0x7A1B2C3DL, wx * 0.01, wz * 0.01) - 0.5) * (SHORE_JITTER_AMPLITUDE * 2.0);
                 threshold[lx][lz] = OCEAN_FROM_MOUNTAIN_DIST + shoreJitter; // base threshold with low-freq jitter
                 double d = distToMtn[lx][lz];
                 double raw = (d - threshold[lx][lz]) / (double) OCEAN_COAST_WIDTH; // <0 land, >0 ocean
-                if (Double.isFinite(raw)) raw = clamp01(0.5 + raw); else raw = 1.0; // far from mountains => ocean
+                if (Double.isFinite(raw)) raw = clamp01(0.5 + raw);
+                else raw = 1.0; // far from mountains => ocean
                 oceanRaw[lx][lz] = raw;
             }
         }
@@ -1048,19 +1131,24 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         for (int pass = 0; pass < 3; pass++) {
             for (int lx = 0; lx < 16; lx++) {
                 for (int lz = 0; lz < 16; lz++) {
-                    int numW = 0; double sum = 0.0;
+                    int numW = 0;
+                    double sum = 0.0;
                     for (int ox = -1; ox <= 1; ox++) {
                         for (int oz = -1; oz <= 1; oz++) {
-                            int x = lx + ox, z = lz + oz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+                            int x = lx + ox, z = lz + oz;
+                            if (x < 0 || x > 15 || z < 0 || z > 15) continue;
                             int wgt = (ox == 0 && oz == 0) ? 4 : ((Math.abs(ox) + Math.abs(oz) == 2) ? 1 : 2);
-                            sum += oceanRaw[x][z] * wgt; numW += wgt;
+                            sum += oceanRaw[x][z] * wgt;
+                            numW += wgt;
                         }
                     }
                     buf[lx][lz] = sum / Math.max(1, numW);
                 }
             }
             // swap
-            double[][] tmp = oceanRaw; oceanRaw = buf; buf = tmp;
+            double[][] tmp = oceanRaw;
+            oceanRaw = buf;
+            buf = tmp;
         }
         // Final mask
         for (int lx = 0; lx < 16; lx++) System.arraycopy(oceanRaw[lx], 0, oceanMask[lx], 0, 16);
@@ -1070,7 +1158,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         boolean[][] iceSheet = new boolean[16][16];
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int wx = chunkBaseX + lx; int wz = chunkBaseZ + lz;
+                int wx = chunkBaseX + lx;
+                int wz = chunkBaseZ + lz;
                 double oceanFactor = oceanMask[lx][lz];
                 boolean isOceanHere = oceanFactor >= 0.5;
                 if (!isOceanHere) continue;
@@ -1083,11 +1172,18 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 boolean deepNeighborhood = true;
                 for (int dx = -6; dx <= 6 && deepNeighborhood; dx++) {
                     for (int dz = -6; dz <= 6; dz++) {
-                        int x = lx + dx, z = lz + dz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
-                        if (oceanMask[x][z] < 0.6) { deepNeighborhood = false; break; }
+                        int x = lx + dx, z = lz + dz;
+                        if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+                        if (oceanMask[x][z] < 0.6) {
+                            deepNeighborhood = false;
+                            break;
+                        }
                         double overN = Math.max(0.0, distToMtn[x][z] - threshold[x][z]);
                         double dN = 2.0 + Math.min(40.0, overN * 0.25);
-                        if (dN < 18.0) { deepNeighborhood = false; break; }
+                        if (dN < 18.0) {
+                            deepNeighborhood = false;
+                            break;
+                        }
                     }
                 }
                 if (!deepNeighborhood) continue;
@@ -1105,7 +1201,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 // Paint iceberg height delta with a rounded profile and shape noise
                 for (int dx = -sheetR; dx <= sheetR; dx++) {
                     for (int dz = -sheetR; dz <= sheetR; dz++) {
-                        int x = lx + dx, z = lz + dz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+                        int x = lx + dx, z = lz + dz;
+                        if (x < 0 || x > 15 || z < 0 || z > 15) continue;
                         double r = Math.hypot(dx, dz);
                         if (r <= coreR) {
                             double t = clamp01(1.0 - (r / coreR));
@@ -1135,7 +1232,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     for (int ox = -1; ox <= 1; ox++) {
                         for (int oz = -1; oz <= 1; oz++) {
                             if (ox == 0 && oz == 0) continue;
-                            int x = lx + ox, z = lz + oz; if (x < 0 || x > 15 || z < 0 || z > 15) continue;
+                            int x = lx + ox, z = lz + oz;
+                            if (x < 0 || x > 15 || z < 0 || z > 15) continue;
                             if (iceSheet[x][z]) neighbors++;
                         }
                     }
@@ -1148,7 +1246,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Fill columns: compute ground + hills unified surface, then lay materials; set biomes
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int wx = chunkBaseX + lx; int wz = chunkBaseZ + lz;
+                int wx = chunkBaseX + lx;
+                int wz = chunkBaseZ + lz;
 
                 // If this column is inside a reserved flat (e.g., bungalow pad), force its surface
                 int reservedY = reservedHeightAt(wx, wz, Integer.MIN_VALUE);
@@ -1286,7 +1385,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                             if (data.getType(lx, OCEAN_SEA_LEVEL, lz) == Material.WATER) {
                                 data.setBlock(lx, OCEAN_SEA_LEVEL, lz, Material.ICE);
                             }
-                        } catch (Throwable ignore) {}
+                        } catch (Throwable ignore) {
+                        }
                     }
 
                     // Occasional kelp
@@ -1307,7 +1407,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                     if (oceanMask[lx][lz] < 0.70) {
                         int y = Math.min(OCEAN_SEA_LEVEL - 1, worldMaxY);
                         while (y >= 140 && data.getType(lx, y, lz) == Material.WATER) y--;
-                        if (y >= 140 && data.getType(lx, y, lz) != Material.AIR) data.setBlock(lx, y, lz, Material.SAND);
+                        if (y >= 140 && data.getType(lx, y, lz) != Material.AIR)
+                            data.setBlock(lx, y, lz, Material.SAND);
                     }
 
                     // Biomes: beach near shore, ocean deeper offshore
@@ -1315,7 +1416,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         if (over < 12) biome.setBiome(lx, lz, Biome.BEACH);
                         else if (depth >= 24) biome.setBiome(lx, lz, Biome.DEEP_OCEAN);
                         else biome.setBiome(lx, lz, Biome.OCEAN);
-                    } catch (Throwable ignore) {}
+                    } catch (Throwable ignore) {
+                    }
                 } else {
                     // Land: fill stone to surface
                     for (int y = 150; y <= finalSurf; y++) data.setBlock(lx, y, lz, Material.STONE);
@@ -1334,10 +1436,14 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         // Sand veneer thickness (tunable)
                         int sandLayers = 4 + (int) Math.round(5.0 * (1.0 - s)); // 4..9
                         for (int i = 0; i < sandLayers; i++) {
-                            int y = finalSurf - i; if (y < 150) break;
+                            int y = finalSurf - i;
+                            if (y < 150) break;
                             data.setBlock(lx, y, lz, Material.SAND);
                         }
-                        try { biome.setBiome(lx, lz, Biome.BEACH); } catch (Throwable ignore) {}
+                        try {
+                            biome.setBiome(lx, lz, Biome.BEACH);
+                        } catch (Throwable ignore) {
+                        }
                     } else {
                         // Top materials and transitional ground: add snow blocks at higher elevations
                         boolean rocky = false;
@@ -1366,12 +1472,16 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                 // Wind/drift field
                                 double drift = fbm2(seed ^ 0x5A0BD123L, wx * 0.03, wz * 0.03); // [0,1]
                                 int layers = 1 + (int) Math.floor(Math.max(0, (drift - 0.4) * 6.0)); // 1..4 typically
-                                if (layers < 1) layers = 1; if (layers > 8) layers = 8;
+                                if (layers < 1) layers = 1;
+                                if (layers > 8) layers = 8;
                                 org.bukkit.block.data.type.Snow snow = (org.bukkit.block.data.type.Snow) org.bukkit.Bukkit.createBlockData(Material.SNOW);
                                 snow.setLayers(layers);
                                 data.setBlock(lx, ySnow, lz, snow);
                             } catch (Throwable ignore) {
-                                try { data.setBlock(lx, ySnow, lz, Material.SNOW); } catch (Throwable ignore2) {}
+                                try {
+                                    data.setBlock(lx, ySnow, lz, Material.SNOW);
+                                } catch (Throwable ignore2) {
+                                }
                             }
                             // Ensure grassy tops get snowy grass appearance with at least 1 layer
                             try {
@@ -1380,7 +1490,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                     one.setLayers(1);
                                     data.setBlock(lx, ySnow, lz, one);
                                 }
-                            } catch (Throwable ignore) {}
+                            } catch (Throwable ignore) {
+                            }
                         }
 
                         // Biomes by height band (plains/taiga/slopes) for inland (non-beach)
@@ -1389,26 +1500,35 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                 if (finalSurf <= 162) biome.setBiome(lx, lz, Biome.SNOWY_PLAINS);
                                 else if (finalSurf >= 185) biome.setBiome(lx, lz, Biome.SNOWY_SLOPES);
                                 else biome.setBiome(lx, lz, Biome.SNOWY_TAIGA);
-                            } catch (Throwable ignore) {}
+                            } catch (Throwable ignore) {
+                            }
                         }
                     }
 
                     // Edge-touch rule: if any 4-neighbor at sea level is water, make this top ≤ sea level sand
                     boolean waterAdj = false;
                     if (OCEAN_SEA_LEVEL >= 0 && OCEAN_SEA_LEVEL <= worldMaxY) {
-                        int[][] dirs = {{1,0},{-1,0},{0,1},{0,-1}};
+                        int[][] dirs = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
                         for (int[] d : dirs) {
                             int nx = lx + d[0], nz = lz + d[1];
-                            if (nx<0||nx>15||nz<0||nz>15) continue;
-                            try { if (data.getType(nx, OCEAN_SEA_LEVEL, nz) == Material.WATER) { waterAdj = true; break; } }
-                            catch (Throwable ignore) {}
+                            if (nx < 0 || nx > 15 || nz < 0 || nz > 15) continue;
+                            try {
+                                if (data.getType(nx, OCEAN_SEA_LEVEL, nz) == Material.WATER) {
+                                    waterAdj = true;
+                                    break;
+                                }
+                            } catch (Throwable ignore) {
+                            }
                         }
                     }
                     if (waterAdj) {
                         int y = Math.min(finalSurf, OCEAN_SEA_LEVEL);
                         data.setBlock(lx, y, lz, Material.SAND);
-                        for (int i = 1; i <= 3 && y-i >= 150; i++) data.setBlock(lx, y - i, lz, Material.SAND);
-                        try { biome.setBiome(lx, lz, Biome.BEACH); } catch (Throwable ignore) {}
+                        for (int i = 1; i <= 3 && y - i >= 150; i++) data.setBlock(lx, y - i, lz, Material.SAND);
+                        try {
+                            biome.setBiome(lx, lz, Biome.BEACH);
+                        } catch (Throwable ignore) {
+                        }
                     }
 
                     // Cleanup: prevent stone from existing above any sand in this land column
@@ -1472,151 +1592,82 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         return clamp01((sum * 0.5) + 0.5);
     }
 
-    // Compute distance in blocks to the nearest mountain using a capped bucketed BFS on a coarse grid
+    // Compute distance in blocks to the nearest mountain using a 2-pass chamfer transform
     private double[][] computeMountainDistances(World world, long seed, double[][] surf, int chunkBaseX, int chunkBaseZ, int worldMaxY, int maxDist) {
-        int halo = Math.min(Math.min(MAX_HALO, D_CAP), maxDist);
+        int halo = Math.min(MAX_HALO, maxDist);
         int size = 16 + halo * 2;
-        int sizeC = size >> 1;
-        int originX = chunkBaseX - halo;
-        int originZ = chunkBaseZ - halo;
+        int off = halo;
+        boolean[][] mountain = TL_MOUNTAIN.get();
+        int[][] dist = TL_DIST.get();
 
-        int axisW = CHAMFER_AXIS * 2;
-        int diagW = CHAMFER_DIAGONAL * 2;
-        int capV = D_CAP * axisW;
-
-        boolean[][] mountain = TL_MOUNTAIN_C.get();
-        int[][] dist = TL_DIST_C.get();
-        for (int x = 0; x <= sizeC; x++) {
-            java.util.Arrays.fill(mountain[x], 0, sizeC + 1, false);
-            java.util.Arrays.fill(dist[x], 0, sizeC + 1, capV + 1);
+        for (int x = 0; x < size; x++) {
+            java.util.Arrays.fill(mountain[x], 0, size, false);
+            java.util.Arrays.fill(dist[x], 0, size, CHAMFER_INF);
         }
 
         boolean any = false;
-
-        // mark mountains inside current chunk
-        for (int lx = 0; lx < 16; lx++) {
-            for (int lz = 0; lz < 16; lz++) {
-                if (surf[lx][lz] >= MOUNTAIN_Y) {
-                    int gx = (lx + halo) >> 1;
-                    int gz = (lz + halo) >> 1;
-                    if (!mountain[gx][gz]) {
-                        mountain[gx][gz] = true;
-                        dist[gx][gz] = 0;
-                        any = true;
-                    }
+        for (int gx = -halo; gx < 16 + halo; gx++) {
+            for (int gz = -halo; gz < 16 + halo; gz++) {
+                double h;
+                if (gx >= 0 && gx < 16 && gz >= 0 && gz < 16) {
+                    h = surf[gx][gz];
+                } else {
+                    int wx = chunkBaseX + gx;
+                    int wz = chunkBaseZ + gz;
+                    h = surfaceApprox(world, seed, wx, wz, worldMaxY);
                 }
-            }
-        }
-
-        // peak-based approximation for off-chunk mountains
-        int chunkX = chunkBaseX >> 4;
-        int chunkZ = chunkBaseZ >> 4;
-        int rChunks = (halo + PEAK_INFLUENCE + 15) >> 4;
-        for (int cx = chunkX - rChunks; cx <= chunkX + rChunks; cx++) {
-            for (int cz = chunkZ - rChunks; cz <= chunkZ + rChunks; cz++) {
-                if (!hasPeak(seed, cx, cz)) continue;
-                int[] p = peakParams(seed, cx, cz);
-                int px = p[0];
-                int pz = p[1];
-                int py = p[2];
-                int rad = 28 + (py - MOUNTAIN_Y) * 6 / 10;
-                if (rad < 24) rad = 24;
-                if (rad > PEAK_INFLUENCE) rad = PEAK_INFLUENCE;
-                int minX = Math.max(px - rad, originX);
-                int maxX = Math.min(px + rad, originX + size - 1);
-                int minZ = Math.max(pz - rad, originZ);
-                int maxZ = Math.min(pz + rad, originZ + size - 1);
-                if (minX > maxX || minZ > maxZ) continue;
-                int gMinX = (minX - originX) >> 1;
-                int gMaxX = (maxX - originX) >> 1;
-                int gMinZ = (minZ - originZ) >> 1;
-                int gMaxZ = (maxZ - originZ) >> 1;
-                int rad2 = rad * rad;
-                for (int gx = gMinX; gx <= gMaxX && gx <= sizeC; gx++) {
-                    int wx = originX + gx * 2 + 1;
-                    int dx = wx - px;
-                    int dx2 = dx * dx;
-                    for (int gz = gMinZ; gz <= gMaxZ && gz <= sizeC; gz++) {
-                        int wz = originZ + gz * 2 + 1;
-                        int dz = wz - pz;
-                        if (dx2 + dz * dz <= rad2) {
-                            if (!mountain[gx][gz]) {
-                                mountain[gx][gz] = true;
-                                dist[gx][gz] = 0;
-                                any = true;
-                            }
-                        }
-                    }
+                if (h >= MOUNTAIN_Y) {
+                    mountain[gx + off][gz + off] = true;
+                    dist[gx + off][gz + off] = 0;
+                    any = true;
                 }
             }
         }
 
         double[][] result = new double[16][16];
         if (!any) {
-            for (int lx = 0; lx < 16; lx++) {
-                java.util.Arrays.fill(result[lx], Double.POSITIVE_INFINITY);
-            }
+            for (int lx = 0; lx < 16; lx++) java.util.Arrays.fill(result[lx], Double.POSITIVE_INFINITY);
             return result;
         }
 
-        @SuppressWarnings("unchecked")
-        java.util.ArrayDeque<Integer>[] buckets = new java.util.ArrayDeque[capV + 1];
-        for (int i = 0; i <= capV; i++) {
-            buckets[i] = new java.util.ArrayDeque<>();
-        }
-
-        for (int x = 0; x <= sizeC; x++) {
-            for (int z = 0; z <= sizeC; z++) {
-                if (mountain[x][z]) buckets[0].add((x << 16) | z);
+        // Forward pass
+        for (int x = 0; x < size; x++) {
+            for (int z = 0; z < size; z++) {
+                int v = dist[x][z];
+                if (v == 0) continue;
+                if (x > 0) v = Math.min(v, dist[x - 1][z] + CHAMFER_AXIS);
+                if (z > 0) v = Math.min(v, dist[x][z - 1] + CHAMFER_AXIS);
+                if (x > 0 && z > 0) v = Math.min(v, dist[x - 1][z - 1] + CHAMFER_DIAGONAL);
+                if (x < size - 1 && z > 0) v = Math.min(v, dist[x + 1][z - 1] + CHAMFER_DIAGONAL);
+                dist[x][z] = v;
             }
         }
 
-        for (int cur = 0; cur <= capV; cur++) {
-            java.util.ArrayDeque<Integer> q = buckets[cur];
-            while (!q.isEmpty()) {
-                int idx = q.pollFirst();
-                int x = idx >>> 16;
-                int z = idx & 0xFFFF;
-                if (dist[x][z] != cur) continue;
-                if (x > 0) relax(dist, buckets, x - 1, z, cur, axisW, capV);
-                if (x < sizeC) relax(dist, buckets, x + 1, z, cur, axisW, capV);
-                if (z > 0) relax(dist, buckets, x, z - 1, cur, axisW, capV);
-                if (z < sizeC) relax(dist, buckets, x, z + 1, cur, axisW, capV);
-                if (x > 0 && z > 0) relax(dist, buckets, x - 1, z - 1, cur, diagW, capV);
-                if (x > 0 && z < sizeC) relax(dist, buckets, x - 1, z + 1, cur, diagW, capV);
-                if (x < sizeC && z > 0) relax(dist, buckets, x + 1, z - 1, cur, diagW, capV);
-                if (x < sizeC && z < sizeC) relax(dist, buckets, x + 1, z + 1, cur, diagW, capV);
+        // Backward pass
+        for (int x = size - 1; x >= 0; x--) {
+            for (int z = size - 1; z >= 0; z--) {
+                int v = dist[x][z];
+                if (x < size - 1) v = Math.min(v, dist[x + 1][z] + CHAMFER_AXIS);
+                if (z < size - 1) v = Math.min(v, dist[x][z + 1] + CHAMFER_AXIS);
+                if (x < size - 1 && z < size - 1) v = Math.min(v, dist[x + 1][z + 1] + CHAMFER_DIAGONAL);
+                if (x > 0 && z < size - 1) v = Math.min(v, dist[x - 1][z + 1] + CHAMFER_DIAGONAL);
+                dist[x][z] = v;
             }
         }
 
         for (int lx = 0; lx < 16; lx++) {
             for (int lz = 0; lz < 16; lz++) {
-                int gx = lx + halo;
-                int gz = lz + halo;
-                int x0 = Math.min(gx >> 1, sizeC - 1);
-                int z0 = Math.min(gz >> 1, sizeC - 1);
-                double tx = (gx & 1) * 0.5;
-                double tz = (gz & 1) * 0.5;
-                double v00 = dist[x0][z0];
-                double v10 = dist[x0 + 1][z0];
-                double v01 = dist[x0][z0 + 1];
-                double v11 = dist[x0 + 1][z0 + 1];
-                double vx0 = v00 + (v10 - v00) * tx;
-                double vx1 = v01 + (v11 - v01) * tx;
-                double v = vx0 + (vx1 - vx0) * tz;
-                double d = (v > capV) ? maxDist : Math.min(maxDist, v / (double) axisW);
+                int v = dist[lx + off][lz + off];
+                double d;
+                if (v >= CHAMFER_INF) {
+                    d = maxDist;
+                } else {
+                    d = Math.min(maxDist, v / (double) CHAMFER_AXIS);
+                }
                 result[lx][lz] = d;
             }
         }
         return result;
-    }
-
-    private static void relax(int[][] dist, java.util.ArrayDeque<Integer>[] buckets, int x, int z, int cur, int w, int capV) {
-        int nd = cur + w;
-        if (nd <= capV && nd < dist[x][z]) {
-            dist[x][z] = nd;
-            buckets[nd].add((x << 16) | z);
-        }
     }
 
     // Recomputes the same surface height logic used to fill surf[][] (approximate, fast)
@@ -1647,26 +1698,49 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Edge taper
         double edge = clamp01((mountainBand - t0) / (t1 - t0));
         double edgeTaper = edge * edge * (3 - 2 * edge);
-        baseLift *= edgeTaper; ridgeAdd *= edgeTaper;
+        baseLift *= edgeTaper;
+        ridgeAdd *= edgeTaper;
         double plains = (fbm2(seed ^ 0x600DD00EL, wx * 0.02, wz * 0.02) - 0.5) * 2.0;
         double h = base + plains + (baseLift * mask) + (ridgeAdd * mask);
         double erosion = fbm2(seed ^ 0x0E01234L, wx * 0.004, wz * 0.004);
         h += (erosion * erosion) * 40.0 * mask;
-        if (h > worldMaxY) h = worldMaxY; if (h < 150) h = 150;
+        if (h > worldMaxY) h = worldMaxY;
+        if (h < 150) h = 150;
         return (int) Math.floor(h);
     }
 
     // --- Component-based cave carver (V2) ---
-    private enum CaveType { WORM, CHAOS_TUNNEL, ARENA, STAIRCASE, OMINOUS_PASSAGE }
+    private enum CaveType {WORM, CHAOS_TUNNEL, ARENA, STAIRCASE, OMINOUS_PASSAGE}
 
     private static final class CaveTask {
-        final CaveType type; final double x, z; final int y; final double yaw, pitch; final int steps;
+        final CaveType type;
+        final double x, z;
+        final int y;
+        final double yaw, pitch;
+        final int steps;
+
         CaveTask(CaveType type, double x, int y, double z, double yaw, double pitch, int steps) {
-            this.type = type; this.x = x; this.y = y; this.z = z; this.yaw = yaw; this.pitch = pitch; this.steps = steps;
+            this.type = type;
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.yaw = yaw;
+            this.pitch = pitch;
+            this.steps = steps;
         }
     }
 
-    private static final class StepResult { final double x, z, yaw; final int y; StepResult(double x, int y, double z, double yaw){this.x=x;this.y=y;this.z=z;this.yaw=yaw;} }
+    private static final class StepResult {
+        final double x, z, yaw;
+        final int y;
+
+        StepResult(double x, int y, double z, double yaw) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.yaw = yaw;
+        }
+    }
 
     private void carveCavesV2(World world, ChunkData data, long seed, int chunkX, int chunkZ) {
         final int REGION = 64;
@@ -1712,20 +1786,33 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                             if (res != null && rr.nextDouble() < INTERSECT_CHANCE && created < MAX_TASKS_PER_REGION) {
                                 CaveType inter = pickIntersector(rr);
                                 switch (inter) {
-                                    case ARENA -> { queue.add(new CaveTask(CaveType.ARENA, res.x, res.y, res.z, res.yaw, 0, 1)); created++; }
-                                    case STAIRCASE -> { double py = -0.6 + rr.nextDouble() * 0.2; queue.add(new CaveTask(CaveType.STAIRCASE, res.x, res.y, res.z, res.yaw, py, 140)); created++; }
-                                    case OMINOUS_PASSAGE -> { queue.add(new CaveTask(CaveType.OMINOUS_PASSAGE, res.x, res.y, res.z, res.yaw, -1.0, 80 + rr.nextInt(60))); created++; }
-                                    default -> {}
+                                    case ARENA -> {
+                                        queue.add(new CaveTask(CaveType.ARENA, res.x, res.y, res.z, res.yaw, 0, 1));
+                                        created++;
+                                    }
+                                    case STAIRCASE -> {
+                                        double py = -0.6 + rr.nextDouble() * 0.2;
+                                        queue.add(new CaveTask(CaveType.STAIRCASE, res.x, res.y, res.z, res.yaw, py, 140));
+                                        created++;
+                                    }
+                                    case OMINOUS_PASSAGE -> {
+                                        queue.add(new CaveTask(CaveType.OMINOUS_PASSAGE, res.x, res.y, res.z, res.yaw, -1.0, 80 + rr.nextInt(60)));
+                                        created++;
+                                    }
+                                    default -> {
+                                    }
                                 }
                             }
                             // Dent connection at worm end toward nearest air
-                            if (res != null && res.y <= 165) dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null && res.y <= 165)
+                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                         }
                         case CHAOS_TUNNEL -> {
                             // Widened and lengthened chaos tunnels
                             StepResult res = carveWorm(data, rr, t, chunkBaseX, chunkBaseZ, yMin, yMax,
                                     1.9, 1.5, 6.5, false, false);
-                            if (res != null && res.y <= 165) dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null && res.y <= 165)
+                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                         }
                         case ARENA -> {
                             carveArenaAndSpur(data, rr, t, queue, created, MAX_TASKS_PER_REGION, yMin, yMax, chunkBaseX, chunkBaseZ);
@@ -1734,7 +1821,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         case STAIRCASE -> {
                             StepResult res = carveWorm(data, rr, t, chunkBaseX, chunkBaseZ, yMin, yMax,
                                     1.5, 1.0, 4.0, true, true);
-                            if (res != null && res.y <= 165) dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
+                            if (res != null && res.y <= 165)
+                                dentTowardsAir(data, chunkBaseX, chunkBaseZ, res.x, res.y, res.z, yMin, yMax);
                         }
                         case OMINOUS_PASSAGE -> {
                             carveOminousPassage(data, rr, t, queue, created, MAX_TASKS_PER_REGION, yMin, yMax, chunkBaseX, chunkBaseZ);
@@ -1756,22 +1844,39 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private StepResult carveWorm(ChunkData data, Random rr, CaveTask t, int chunkBaseX, int chunkBaseZ,
                                  int yMin, int yMax, double stepLen, double rMin, double rMax,
                                  boolean shorter, boolean chaos) {
-        double x=t.x, z=t.z, yaw=t.yaw, pitch=t.pitch; int y=t.y;
-        double rPhase = rr.nextDouble() * Math.PI * 2.0; double rFreq = 0.05 + rr.nextDouble() * 0.05;
-        for (int s=0; s<t.steps; s++){
-            x += Math.cos(yaw) * stepLen; z += Math.sin(yaw) * stepLen; y += (int)Math.round(Math.sin(pitch));
+        double x = t.x, z = t.z, yaw = t.yaw, pitch = t.pitch;
+        int y = t.y;
+        double rPhase = rr.nextDouble() * Math.PI * 2.0;
+        double rFreq = 0.05 + rr.nextDouble() * 0.05;
+        for (int s = 0; s < t.steps; s++) {
+            x += Math.cos(yaw) * stepLen;
+            z += Math.sin(yaw) * stepLen;
+            y += (int) Math.round(Math.sin(pitch));
             if (chaos) {
-                yaw += (rr.nextDouble()-0.5)*0.6; pitch += (rr.nextDouble()-0.5)*0.3; if (rr.nextDouble()<0.07) yaw += (rr.nextDouble()-0.5)*Math.PI;
+                yaw += (rr.nextDouble() - 0.5) * 0.6;
+                pitch += (rr.nextDouble() - 0.5) * 0.3;
+                if (rr.nextDouble() < 0.07) yaw += (rr.nextDouble() - 0.5) * Math.PI;
             } else {
-                yaw += (rr.nextDouble()-0.5)*0.4; pitch += (rr.nextDouble()-0.5)*0.2; if (rr.nextDouble()<0.05) yaw += (rr.nextDouble()-0.5)*Math.PI;
+                yaw += (rr.nextDouble() - 0.5) * 0.4;
+                pitch += (rr.nextDouble() - 0.5) * 0.2;
+                if (rr.nextDouble() < 0.05) yaw += (rr.nextDouble() - 0.5) * Math.PI;
             }
-            if (y < yMin + 1) { y = yMin + 1; pitch = Math.abs(pitch) * 0.5; }
-            if (y > yMax - 1) { y = yMax - 1; pitch = -Math.abs(pitch) * 0.5; }
-            if (pitch < -1.0) pitch = -1.0; if (pitch > 1.0) pitch = 1.0;
-            double baseR = rMin + rr.nextDouble() * (rMax - rMin); if (shorter) baseR = Math.max(0.8, baseR - 1.0);
-            double radius = Math.max(0.8, Math.min(6.0, baseR + 0.5*Math.sin(rPhase + s*rFreq)));
+            if (y < yMin + 1) {
+                y = yMin + 1;
+                pitch = Math.abs(pitch) * 0.5;
+            }
+            if (y > yMax - 1) {
+                y = yMax - 1;
+                pitch = -Math.abs(pitch) * 0.5;
+            }
+            if (pitch < -1.0) pitch = -1.0;
+            if (pitch > 1.0) pitch = 1.0;
+            double baseR = rMin + rr.nextDouble() * (rMax - rMin);
+            if (shorter) baseR = Math.max(0.8, baseR - 1.0);
+            double radius = Math.max(0.8, Math.min(6.0, baseR + 0.5 * Math.sin(rPhase + s * rFreq)));
             carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, radius, yMin, yMax);
-            if (rr.nextDouble() < 0.01) carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, 6.0 + rr.nextInt(7), yMin, yMax);
+            if (rr.nextDouble() < 0.01)
+                carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, 6.0 + rr.nextInt(7), yMin, yMax);
         }
         // Overshoot: continue a bit past the end to help connections
         int overshoot = 6 + rr.nextInt(10); // 6..15 extra steps
@@ -1779,22 +1884,24 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         for (int s = 0; s < overshoot; s++) {
             x += Math.cos(yaw) * stepLen;
             z += Math.sin(yaw) * stepLen;
-            y += (int)Math.round(Math.sin(tailPitch) * 0.5);
+            y += (int) Math.round(Math.sin(tailPitch) * 0.5);
             // very gentle drift to reduce parallel miss
             yaw += (rr.nextDouble() - 0.5) * 0.10;
             tailPitch *= 0.9;
 
             double baseR = rMin + rr.nextDouble() * (rMax - rMin);
-            double taper = 0.8 - 0.5 * (s / (double)Math.max(1, overshoot - 1)); // taper down along tail
+            double taper = 0.8 - 0.5 * (s / (double) Math.max(1, overshoot - 1)); // taper down along tail
             double radius = Math.max(0.8, Math.min(5.0, baseR * taper));
             carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, radius, yMin, yMax);
         }
-        return new StepResult(x,y,z,yaw);
+        return new StepResult(x, y, z, yaw);
     }
 
     private void carveArenaAndSpur(ChunkData data, Random rr, CaveTask t, ArrayDeque<CaveTask> queue,
                                    int created, int maxTasks, int yMin, int yMax, int chunkBaseX, int chunkBaseZ) {
-        double cx=t.x, cz=t.z; int cy=t.y; double radH=6.0+rr.nextDouble()*6.0, radV=1.5+rr.nextDouble()*1.0; // shorter roof
+        double cx = t.x, cz = t.z;
+        int cy = t.y;
+        double radH = 6.0 + rr.nextDouble() * 6.0, radV = 1.5 + rr.nextDouble() * 1.0; // shorter roof
         carveEllipsoid(data, chunkBaseX, chunkBaseZ, cx, cy, cz, radH, radV, yMin, yMax);
         // 50% chance to add an ominous passage at the center; counts as the arena's connection
         if (created < maxTasks) {
@@ -1803,9 +1910,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 queue.add(new CaveTask(CaveType.OMINOUS_PASSAGE, cx, cy, cz, 0, -1.0, steps));
             } else {
                 // otherwise spawn a lateral tunnel from a random wall
-                double phi = rr.nextDouble()*Math.PI*2.0;
-                double sx=cx+Math.cos(phi)*(radH-0.5); double sz=cz+Math.sin(phi)*(radH-0.5);
-                int sy=cy; CaveType next = rr.nextBoolean()?CaveType.WORM:CaveType.CHAOS_TUNNEL;
+                double phi = rr.nextDouble() * Math.PI * 2.0;
+                double sx = cx + Math.cos(phi) * (radH - 0.5);
+                double sz = cz + Math.sin(phi) * (radH - 0.5);
+                int sy = cy;
+                CaveType next = rr.nextBoolean() ? CaveType.WORM : CaveType.CHAOS_TUNNEL;
                 int steps = (next == CaveType.CHAOS_TUNNEL)
                         ? 220 + rr.nextInt(100)  // lengthen chaos tunnels
                         : 160 + rr.nextInt(80);
@@ -1816,16 +1925,18 @@ public class ArcticChunkGenerator extends ChunkGenerator {
 
     private void carveOminousPassage(ChunkData data, Random rr, CaveTask t, ArrayDeque<CaveTask> queue,
                                      int created, int maxTasks, int yMin, int yMax, int chunkBaseX, int chunkBaseZ) {
-        double x=t.x, z=t.z; int y=t.y; int steps=t.steps;
-        double radiusBase = 2.8 + rr.nextDouble()*1.8; // wider shafts ~2.8..4.6
+        double x = t.x, z = t.z;
+        int y = t.y;
+        int steps = t.steps;
+        double radiusBase = 2.8 + rr.nextDouble() * 1.8; // wider shafts ~2.8..4.6
         // Top flare to guarantee a clear entrance
         carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, radiusBase + 1.0, yMin, yMax);
         // Straight drop with maximum height limit of 25 blocks
         int carved = 0;
-        for (int s=0; s<steps && y>yMin+1 && carved < 25; s++){
-            double r = radiusBase + (s%7==0 ? 0.4 : 0.0); // subtle periodic widening
-            carveSphere(data, chunkBaseX, chunkBaseZ, x,y,z,r,yMin,yMax);
-            y -= 1 + (rr.nextDouble()<0.15?1:0); // mostly 1/block step, sometimes 2
+        for (int s = 0; s < steps && y > yMin + 1 && carved < 25; s++) {
+            double r = radiusBase + (s % 7 == 0 ? 0.4 : 0.0); // subtle periodic widening
+            carveSphere(data, chunkBaseX, chunkBaseZ, x, y, z, r, yMin, yMax);
+            y -= 1 + (rr.nextDouble() < 0.15 ? 1 : 0); // mostly 1/block step, sometimes 2
             carved++;
         }
         // Bottom flare + connector
@@ -1833,35 +1944,41 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         // Keep ominous passage connector but only if it ends deeper
         if (y <= yMin + 8) dentTowardsAir(data, chunkBaseX, chunkBaseZ, x, y, z, yMin, yMax);
         if (created < maxTasks) {
-            double yaw = rr.nextDouble()*Math.PI*2.0;
-            queue.add(new CaveTask(CaveType.WORM, x, Math.max(yMin+2,y), z, yaw, 0, 160));
+            double yaw = rr.nextDouble() * Math.PI * 2.0;
+            queue.add(new CaveTask(CaveType.WORM, x, Math.max(yMin + 2, y), z, yaw, 0, 160));
         }
     }
 
-    private void carveSphere(ChunkData data, int chunkBaseX, int chunkBaseZ, double cx, int cy, double cz, double r, int yMin, int yMax){
-        int ix=(int)Math.floor(cx), iz=(int)Math.floor(cz); int minX=ix-(int)Math.ceil(r), maxX=ix+(int)Math.ceil(r); int minZ=iz-(int)Math.ceil(r), maxZ=iz+(int)Math.ceil(r);
-        int minY=Math.max(cy-(int)Math.ceil(r), yMin), maxY=Math.min(cy+(int)Math.ceil(r), yMax);
-        for(int wx=Math.max(minX,chunkBaseX); wx<=Math.min(maxX,chunkBaseX+15); wx++){
-            int lx=wx-chunkBaseX;
-            for(int wz=Math.max(minZ,chunkBaseZ); wz<=Math.min(maxZ,chunkBaseZ+15); wz++){
-                int lz=wz-chunkBaseZ;
-                for(int wy=minY; wy<=maxY; wy++){
-                    if(wy<=-61) continue;
-                    double dx=wx-cx, dy=wy-cy, dz=wz-cz;
-                    if(dx*dx+dy*dy+dz*dz<=r*r){
+    private void carveSphere(ChunkData data, int chunkBaseX, int chunkBaseZ, double cx, int cy, double cz, double r, int yMin, int yMax) {
+        int ix = (int) Math.floor(cx), iz = (int) Math.floor(cz);
+        int minX = ix - (int) Math.ceil(r), maxX = ix + (int) Math.ceil(r);
+        int minZ = iz - (int) Math.ceil(r), maxZ = iz + (int) Math.ceil(r);
+        int minY = Math.max(cy - (int) Math.ceil(r), yMin), maxY = Math.min(cy + (int) Math.ceil(r), yMax);
+        for (int wx = Math.max(minX, chunkBaseX); wx <= Math.min(maxX, chunkBaseX + 15); wx++) {
+            int lx = wx - chunkBaseX;
+            for (int wz = Math.max(minZ, chunkBaseZ); wz <= Math.min(maxZ, chunkBaseZ + 15); wz++) {
+                int lz = wz - chunkBaseZ;
+                for (int wy = minY; wy <= maxY; wy++) {
+                    if (wy <= -61) continue;
+                    double dx = wx - cx, dy = wy - cy, dz = wz - cz;
+                    if (dx * dx + dy * dy + dz * dz <= r * r) {
                         // Prevent carving above Y=120 if there's water above this point (protect oceans)
                         if (wy > 120) {
                             boolean waterAbove = false;
                             int upper = Math.min(yMax, OCEAN_SEA_LEVEL);
                             for (int ya = wy + 1; ya <= upper; ya++) {
                                 try {
-                                    if (data.getType(lx, ya, lz) == Material.WATER) { waterAbove = true; break; }
-                                } catch (Throwable ignore) {}
+                                    if (data.getType(lx, ya, lz) == Material.WATER) {
+                                        waterAbove = true;
+                                        break;
+                                    }
+                                } catch (Throwable ignore) {
+                                }
                             }
                             // Also prevent carving near water columns horizontally (shorelines)
                             if (waterAbove || isNearWaterColumn(data, lx, wy, lz, 4, yMin, yMax)) continue;
                         }
-                        data.setBlock(lx,wy,lz,Material.AIR);
+                        data.setBlock(lx, wy, lz, Material.AIR);
                         hardenHighCaveWalls(data, lx, wy, lz);
                     }
                 }
@@ -1869,28 +1986,36 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         }
     }
 
-    private void carveEllipsoid(ChunkData data, int chunkBaseX, int chunkBaseZ, double cx, int cy, double cz, double radH, double radV, int yMin, int yMax){
-        int ix=(int)Math.floor(cx), iz=(int)Math.floor(cz); int minX=ix-(int)Math.ceil(radH), maxX=ix+(int)Math.ceil(radH); int minZ=iz-(int)Math.ceil(radH), maxZ=iz+(int)Math.ceil(radH);
-        int minY=Math.max(cy-(int)Math.ceil(radV), yMin), maxY=Math.min(cy+(int)Math.ceil(radV), yMax); double invH2=1.0/(radH*radH);
-        for(int wx=Math.max(minX,chunkBaseX); wx<=Math.min(maxX,chunkBaseX+15); wx++){
-            int lx=wx-chunkBaseX;
-            for(int wz=Math.max(minZ,chunkBaseZ); wz<=Math.min(maxZ,chunkBaseZ+15); wz++){
-                int lz=wz-chunkBaseZ;
-                for(int wy=minY; wy<=maxY; wy++){
-                    if(wy<=-61) continue;
-                    double dx=wx-cx, dy=(wy-cy)/radV, dz=wz-cz; double rho=(dx*dx+dz*dz)*invH2 + dy*dy;
-                    if(rho<=1.0){
+    private void carveEllipsoid(ChunkData data, int chunkBaseX, int chunkBaseZ, double cx, int cy, double cz, double radH, double radV, int yMin, int yMax) {
+        int ix = (int) Math.floor(cx), iz = (int) Math.floor(cz);
+        int minX = ix - (int) Math.ceil(radH), maxX = ix + (int) Math.ceil(radH);
+        int minZ = iz - (int) Math.ceil(radH), maxZ = iz + (int) Math.ceil(radH);
+        int minY = Math.max(cy - (int) Math.ceil(radV), yMin), maxY = Math.min(cy + (int) Math.ceil(radV), yMax);
+        double invH2 = 1.0 / (radH * radH);
+        for (int wx = Math.max(minX, chunkBaseX); wx <= Math.min(maxX, chunkBaseX + 15); wx++) {
+            int lx = wx - chunkBaseX;
+            for (int wz = Math.max(minZ, chunkBaseZ); wz <= Math.min(maxZ, chunkBaseZ + 15); wz++) {
+                int lz = wz - chunkBaseZ;
+                for (int wy = minY; wy <= maxY; wy++) {
+                    if (wy <= -61) continue;
+                    double dx = wx - cx, dy = (wy - cy) / radV, dz = wz - cz;
+                    double rho = (dx * dx + dz * dz) * invH2 + dy * dy;
+                    if (rho <= 1.0) {
                         if (wy > 120) {
                             boolean waterAbove = false;
                             int upper = Math.min(yMax, OCEAN_SEA_LEVEL);
                             for (int ya = wy + 1; ya <= upper; ya++) {
                                 try {
-                                    if (data.getType(lx, ya, lz) == Material.WATER) { waterAbove = true; break; }
-                                } catch (Throwable ignore) {}
+                                    if (data.getType(lx, ya, lz) == Material.WATER) {
+                                        waterAbove = true;
+                                        break;
+                                    }
+                                } catch (Throwable ignore) {
+                                }
                             }
                             if (waterAbove || isNearWaterColumn(data, lx, wy, lz, 4, yMin, yMax)) continue;
                         }
-                        data.setBlock(lx,wy,lz,Material.AIR);
+                        data.setBlock(lx, wy, lz, Material.AIR);
                         hardenHighCaveWalls(data, lx, wy, lz);
                     }
                 }
@@ -1909,7 +2034,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 } else if (seenSand && (m == Material.STONE || m == Material.DIRT)) {
                     data.setBlock(lx, y, lz, Material.SAND);
                 }
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+            }
         }
     }
 
@@ -1928,8 +2054,12 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 boolean found = false;
                 for (int y = yMin; y <= yMax; y++) {
                     try {
-                        if (data.getType(lx, y, lz) == Material.WATER) { found = true; break; }
-                    } catch (Throwable ignore) {}
+                        if (data.getType(lx, y, lz) == Material.WATER) {
+                            found = true;
+                            break;
+                        }
+                    } catch (Throwable ignore) {
+                    }
                 }
                 hasWater[lx][lz] = found;
             }
@@ -1942,12 +2072,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
             for (int lz = 0; lz < 16; lz++) {
                 boolean nw = false;
                 for (int dx = -r; dx <= r && !nw; dx++) {
-                    int x = lx + dx; if (x < 0 || x > 15) continue;
+                    int x = lx + dx;
+                    if (x < 0 || x > 15) continue;
                     int dx2 = dx * dx;
                     for (int dz = -r; dz <= r; dz++) {
-                        int z = lz + dz; if (z < 0 || z > 15) continue;
-                        if (dx2 + dz*dz > r2) continue;
-                        if (hasWater[x][z]) { nw = true; break; }
+                        int z = lz + dz;
+                        if (z < 0 || z > 15) continue;
+                        if (dx2 + dz * dz > r2) continue;
+                        if (hasWater[x][z]) {
+                            nw = true;
+                            break;
+                        }
                     }
                 }
                 nearWater[lx][lz] = nw;
@@ -1964,7 +2099,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         if (m == Material.DIRT || m == Material.GRASS_BLOCK) {
                             data.setBlock(lx, y, lz, Material.SAND);
                         }
-                    } catch (Throwable ignore) {}
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }
@@ -1981,7 +2117,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                         } else if (seenSand && (m == Material.DIRT || m == Material.GRASS_BLOCK || m == Material.STONE)) {
                             data.setBlock(lx, y, lz, Material.SAND);
                         }
-                    } catch (Throwable ignore) {}
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }
@@ -1993,14 +2130,17 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         int yStart = Math.max(ly - 2, yMin);
         int yEnd = Math.min(OCEAN_SEA_LEVEL + 2, yMax);
         for (int dx = -radius; dx <= radius; dx++) {
-            int x = lx + dx; if (x < 0 || x > 15) continue;
+            int x = lx + dx;
+            if (x < 0 || x > 15) continue;
             for (int dz = -radius; dz <= radius; dz++) {
-                if (dx*dx + dz*dz > r2) continue;
-                int z = lz + dz; if (z < 0 || z > 15) continue;
+                if (dx * dx + dz * dz > r2) continue;
+                int z = lz + dz;
+                if (z < 0 || z > 15) continue;
                 for (int y = yStart; y <= yEnd; y++) {
                     try {
                         if (data.getType(x, y, z) == Material.WATER) return true;
-                    } catch (Throwable ignore) {}
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }
@@ -2010,7 +2150,7 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     // Convert exposed dirt/grass adjacent to newly carved air into stone above Y=147 to avoid dirt/grass cave walls
     private void hardenHighCaveWalls(ChunkData data, int lx, int ly, int lz) {
         if (ly <= 147) return;
-        final int[][] dirs = new int[][]{{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+        final int[][] dirs = new int[][]{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
         for (int[] d : dirs) {
             int nx = lx + d[0];
             int ny = ly + d[1];
@@ -2022,7 +2162,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                 if (m == Material.DIRT || m == Material.GRASS_BLOCK) {
                     data.setBlock(nx, ny, nz, Material.STONE);
                 }
-            } catch (Throwable ignore) {}
+            } catch (Throwable ignore) {
+            }
         }
     }
 
@@ -2031,23 +2172,32 @@ public class ArcticChunkGenerator extends ChunkGenerator {
                                 double ex, int ey, double ez, int yMin, int yMax) {
         int bestLX = -1, bestLY = -1, bestLZ = -1;
         double bestDist2 = Double.POSITIVE_INFINITY;
-        int exi = (int)Math.floor(ex), ezi = (int)Math.floor(ez);
+        int exi = (int) Math.floor(ex), ezi = (int) Math.floor(ez);
         int lx0 = exi - chunkBaseX;
         int lz0 = ezi - chunkBaseZ;
         // Search within radius up to 12 blocks for air
         int R = 12;
         for (int dy = -R; dy <= R; dy++) {
-            int y = ey + dy; if (y < yMin || y > yMax) continue; if (y <= -61) continue;
+            int y = ey + dy;
+            if (y < yMin || y > yMax) continue;
+            if (y <= -61) continue;
             for (int dx = -R; dx <= R; dx++) {
-                int lx = lx0 + dx; if (lx < 0 || lx > 15) continue;
+                int lx = lx0 + dx;
+                if (lx < 0 || lx > 15) continue;
                 for (int dz = -R; dz <= R; dz++) {
-                    int lz = lz0 + dz; if (lz < 0 || lz > 15) continue;
-                    double d2 = dx*dx + dy*dy + dz*dz; if (d2 >= bestDist2) continue;
+                    int lz = lz0 + dz;
+                    if (lz < 0 || lz > 15) continue;
+                    double d2 = dx * dx + dy * dy + dz * dz;
+                    if (d2 >= bestDist2) continue;
                     try {
                         if (data.getType(lx, y, lz) == Material.AIR) {
-                            bestDist2 = d2; bestLX = lx; bestLY = y; bestLZ = lz;
+                            bestDist2 = d2;
+                            bestLX = lx;
+                            bestLY = y;
+                            bestLZ = lz;
                         }
-                    } catch (Throwable ignore) {}
+                    } catch (Throwable ignore) {
+                    }
                 }
             }
         }
@@ -2056,14 +2206,14 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         double tx = chunkBaseX + bestLX + 0.5;
         double tz = chunkBaseZ + bestLZ + 0.5;
         double ty = bestLY + 0.5;
-        int steps = (int)Math.ceil(Math.sqrt(bestDist2));
+        int steps = (int) Math.ceil(Math.sqrt(bestDist2));
         steps = Math.max(2, Math.min(steps, 16));
         for (int s = 0; s <= steps; s++) {
-            double t = s / (double)steps;
+            double t = s / (double) steps;
             double cx = ex + (tx - ex) * t;
             double cy = ey + (ty - ey) * t;
             double cz = ez + (tz - ez) * t;
-            carveSphere(data, chunkBaseX, chunkBaseZ, cx, (int)Math.round(cy), cz, 1.0, yMin, yMax);
+            carveSphere(data, chunkBaseX, chunkBaseZ, cx, (int) Math.round(cy), cz, 1.0, yMin, yMax);
         }
     }
 }
