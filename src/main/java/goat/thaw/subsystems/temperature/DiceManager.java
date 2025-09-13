@@ -65,7 +65,13 @@ public class DiceManager implements Listener {
         int y = p.getLocation().getBlockY() + 1; // one above feet
         int z = p.getLocation().getBlockZ();
 
-        double externalBias = computeExternalTemperatureDFS(w, x, y, z);
+        double externalBias;
+        if (w.getEnvironment() == World.Environment.NETHER) {
+            // Nether baseline is extremely hot
+            externalBias = 200.0;
+        } else {
+            externalBias = computeExternalTemperatureDFS(w, x, y, z);
+        }
 
         // Update ExternalTemperature stat
         StatInstance ext = stats.get(p.getUniqueId(), "ExternalTemperature");
