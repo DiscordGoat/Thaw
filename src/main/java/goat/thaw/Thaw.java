@@ -22,6 +22,8 @@ import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
+import org.bukkit.block.Block;
+import org.bukkit.Material;
 import org.bukkit.plugin.java.JavaPlugin;
 import goat.thaw.subsystems.temperature.DiceManager;
 import goat.thaw.subsystems.temperature.FireTickManager;
@@ -269,6 +271,43 @@ public final class Thaw extends JavaPlugin {
                 }
             }, 200L, 200L);
         });
+    }
+
+    private boolean isValidCapsuleLocation(Location loc) {
+        World world = loc.getWorld();
+        if (world == null) return false;
+        Block block = world.getBlockAt(loc);
+        if (!block.getType().isAir()) return false;
+        if (loc.getBlockY() >= world.getHighestBlockYAt(loc.getBlockX(), loc.getBlockZ())) return false;
+
+        int baseX = loc.getBlockX();
+        int baseY = loc.getBlockY();
+        int baseZ = loc.getBlockZ();
+
+        boolean hasStoneAbove = false;
+        for (int dy = 1; dy <= 10; dy++) {
+            Block above = world.getBlockAt(baseX, baseY + dy, baseZ);
+            if (above.getType() == Material.STONE) {
+                hasStoneAbove = true;
+                break;
+            }
+        }
+        if (!hasStoneAbove) return false;
+
+        int radius = 10;
+        for (int dx = -radius; dx <= radius; dx++) {
+            for (int dy = -radius; dy <= radius; dy++) {
+                for (int dz = -radius; dz <= radius; dz++) {
+                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                    if (dx * dx + dy * dy + dz * dz > radius * radius) continue;
+                    Block nearby = world.getBlockAt(baseX + dx, baseY + dy, baseZ + dz);
+                    if (nearby.getType().isAir()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     @Override
