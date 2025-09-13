@@ -31,6 +31,7 @@ import goat.thaw.subsystems.oxygen.OxygenManager;
 import org.bukkit.scheduler.BukkitRunnable;
 import goat.thaw.system.capsule.CapsuleRegistry;
 import goat.thaw.system.capsule.CapsuleGolemListener;
+import goat.thaw.subsystems.eyespy.EyeSpyManager;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
@@ -57,6 +58,7 @@ public final class Thaw extends JavaPlugin {
     private EffectManager effectManager;
     private OxygenManager oxygenManager;
     private FireTickManager fireTickManager;
+    private EyeSpyManager eyeSpyManager;
     private SchemManager schematicManager;
     private BungalowLootManager lootManager;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
@@ -176,6 +178,10 @@ public final class Thaw extends JavaPlugin {
         oxygenManager = new OxygenManager(this, statsManager);
         oxygenManager.start();
 
+        // Eye Spy: nocturnal tracking eye
+        eyeSpyManager = new EyeSpyManager(this);
+        eyeSpyManager.start();
+
         // Tablist: condition overview segments + world pop
         tablistManager = new TablistManager(this, statsManager, populationManager, effectManager, oxygenManager);
         tablistManager.start();
@@ -270,6 +276,7 @@ public final class Thaw extends JavaPlugin {
         if (effectManager != null) effectManager.stop();
         if (fireTickManager != null) fireTickManager.stop();
         if (oxygenManager != null) oxygenManager.stop();
+        if (eyeSpyManager != null) eyeSpyManager.stop();
     }
 
     private static class ChunkPos {
