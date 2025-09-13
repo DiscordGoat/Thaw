@@ -35,6 +35,7 @@ import goat.thaw.system.capsule.CapsuleRegistry;
 import goat.thaw.system.capsule.CapsuleLootManager;
 import goat.thaw.subsystems.eyespy.EyeSpyManager;
 import goat.thaw.system.WolfSpawnListener;
+import goat.thaw.system.ctm.GenerateCTMEvent;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
@@ -65,6 +66,7 @@ public final class Thaw extends JavaPlugin {
     private SchemManager schematicManager;
     private BungalowLootManager lootManager;
     private CapsuleLootManager capsuleLootManager;
+    private boolean ctmGenerated = false;
     private static final List<String> BUNGALOW_SCHEMATICS = Arrays.asList(
             "fire",
             "scholar",
@@ -268,6 +270,22 @@ public final class Thaw extends JavaPlugin {
                         schematicManager.placeStructure(schem, loc);
                         String type = schem.toUpperCase();
                         Bukkit.getScheduler().runTaskLater(this, () -> capsuleLootManager.populateLoot(loc, type), 20L);
+                    }
+                }
+
+                List<Location> ctms;
+                synchronized (gen.ctmQueue) {
+                    ctms = new ArrayList<>(gen.ctmQueue);
+                    gen.ctmQueue.clear();
+                }
+
+                if (!ctmGenerated) {
+                    for (Location loc : ctms) {
+                        if (!isValidCapsuleLocation(loc)) continue;
+                        schematicManager.placeStructure("ctm", loc);
+                        Bukkit.getPluginManager().callEvent(new GenerateCTMEvent(loc));
+                        ctmGenerated = true;
+                        break;
                     }
                 }
             }, 200L, 200L);
