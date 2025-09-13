@@ -4,6 +4,7 @@ import goat.thaw.subsystems.calories.ActivityEnergyManager;
 import goat.thaw.subsystems.combat.PopulationManager;
 import goat.thaw.subsystems.temperature.ThermalRegulator;
 import goat.thaw.system.FirstJoinListener;
+import goat.thaw.system.EyeOfEnderListener;
 import goat.thaw.system.dev.*;
 import goat.thaw.system.space.SpaceManager;
 import goat.thaw.system.space.SpaceEventListener;
@@ -90,10 +91,16 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new FirstJoinListener(this), this);
         getServer().getPluginManager().registerEvents(new WolfSpawnListener(), this);
+        getServer().getPluginManager().registerEvents(new EyeOfEnderListener(), this);
         getCommand("locateBungalows").setExecutor(new LocateBungalowsCommand());
 
         // Schematic system
         schematicManager = new SchemManager(this);
+        World defaultWorld = Bukkit.getWorlds().isEmpty() ? null : Bukkit.getWorlds().get(0);
+        if (defaultWorld != null) {
+            Location origin = new Location(defaultWorld, 0, -45, 0);
+            schematicManager.placeStructure("stronghold", origin);
+        }
         lootManager = new BungalowLootManager();
         capsuleLootManager = new CapsuleLootManager();
         
