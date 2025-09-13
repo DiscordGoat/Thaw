@@ -49,17 +49,22 @@ public class MonumentRewardListener implements Listener {
         w.playSound(drop, Sound.UI_TOAST_CHALLENGE_COMPLETE, 1f, 1f);
         spawnParticles(w, drop, m.getType());
     }
-
     private void spawnParticles(World w, Location loc, MonumentType type) {
         Particle.DustOptions dust = new Particle.DustOptions(type.getColor(), 1.0f);
+
         new BukkitRunnable() {
             int ticks = 0;
             @Override
             public void run() {
                 if (ticks >= 600) { cancel(); return; }
-                w.spawnParticle(Particle.REDSTONE, loc, 20, 0.5, 0.5, 0.5, dust);
+                // Preferred / most common overload
+                w.spawnParticle(Particle.DUST, loc, 20, 0.5, 0.5, 0.5, dust);
+                // If your Spigot build fails to resolve that overload, use this fallback:
+                // w.spawnParticle(Particle.REDSTONE, loc, 20, 0.5, 0.5, 0.5, 0, dust);
+
                 ticks += 20;
             }
         }.runTaskTimer(plugin, 0L, 20L);
     }
+
 }

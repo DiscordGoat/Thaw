@@ -118,24 +118,49 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         int minY = baseY, maxY = baseY;
         Map<Integer, Integer> heightCounts = new HashMap<>();
 
-        for (int dx = -7; dx <= 7; dx++)
+        for (int dx = -7; dx <= 7; dx++) {
             for (int dz = -7; dz <= 7; dz++) {
-                int x = (lx + dx) & 15, z = (lz + dz) & 15;
-                int y = getHighestBlockY(data, world, x, z);
+                int worldX = wx + dx;
+                int worldZ = wz + dz;
+
+                int xLocal = lx + dx;
+                int zLocal = lz + dz;
+
+                int y;
+                if (xLocal >= 0 && xLocal <= 15 && zLocal >= 0 && zLocal <= 15) {
+                    // inside current chunk -> read from ChunkData
+                    y = getHighestBlockY(data, world, xLocal, zLocal);
+                } else {
+                    // outside current chunk -> approximate the surface here
+                    y = surfaceApprox(world, world.getSeed(), worldX, worldZ, world.getMaxHeight() - 1);
+                }
+
                 minY = Math.min(minY, y);
                 maxY = Math.max(maxY, y);
                 heightCounts.merge(y, 1, Integer::sum);
 
                 if (y < 154 || y > 158) return false;
-                Material topType = data.getType(x, y, z);
-                if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT))
-                    return false;
-                Material below = data.getType(x, y - 1, z);
-                if (below == Material.WATER || below == Material.SAND) return false;
-            }
 
+                // Only perform block-type checks when we can read the actual ChunkData (inside chunk)
+                if (xLocal >= 0 && xLocal <= 15 && zLocal >= 0 && zLocal <= 15) {
+                    Material topType = data.getType(xLocal, y, zLocal);
+                    if (!(topType == Material.SNOW || topType == Material.SNOW_BLOCK || topType == Material.DIRT))
+                        return false;
+                    Material below = data.getType(xLocal, y - 1, zLocal);
+                    if (below == Material.WATER || below == Material.SAND) return false;
+                } else {
+                    // neighbour column outside this chunk: check reserved flats if any (conservative)
+                    int reserved = reservedHeightAt(worldX, worldZ, Integer.MIN_VALUE);
+                    if (reserved != Integer.MIN_VALUE && (reserved < 154 || reserved > 158)) return false;
+                    // otherwise skip material checks (we can't trust them here during generation)
+                }
+            }
+        }
+
+        // Keep away from obvious height variance
         if (maxY - minY > 2) return false;
 
+        // Require a dominant height (prevents highly mixed columns)
         int dominant = heightCounts.values().stream().max(Integer::compareTo).orElse(0);
         int total = heightCounts.values().stream().mapToInt(i -> i).sum();
         if ((dominant / (double) total) < 0.65) return false;

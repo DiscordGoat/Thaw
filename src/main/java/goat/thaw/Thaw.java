@@ -19,12 +19,10 @@ import goat.thaw.subsystems.calories.CalorieManager;
 import goat.thaw.system.DailyAnnouncementManager;
 import goat.thaw.system.SidebarManager;
 import goat.thaw.system.TablistManager;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.World;
-import org.bukkit.WorldCreator;
+import org.bukkit.*;
 import org.bukkit.block.Block;
-import org.bukkit.Material;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 import org.bukkit.plugin.java.JavaPlugin;
 import goat.thaw.subsystems.temperature.DiceManager;
 import goat.thaw.subsystems.temperature.FireTickManager;
@@ -100,10 +98,15 @@ public final class Thaw extends JavaPlugin {
 
         // Schematic system
         schematicManager = new SchemManager(this);
-        World defaultWorld = Bukkit.getWorlds().isEmpty() ? null : Bukkit.getWorlds().get(0);
-        if (defaultWorld != null) {
-            Location origin = new Location(defaultWorld, 0, -45, 0);
-            schematicManager.placeStructure("stronghold", origin);
+        World world = Bukkit.getWorld("arctic");
+        if (world != null) {
+            NamespacedKey key = new NamespacedKey(Thaw.getInstance(), "stronghold_placed");
+            PersistentDataContainer pdc = world.getPersistentDataContainer();
+            if (!pdc.has(key, PersistentDataType.BYTE)) {
+                Location origin = new Location(world, 0, -45, 0);
+                schematicManager.placeStructure("stronghold", origin);
+                pdc.set(key, PersistentDataType.BYTE, (byte)1); // mark as placed
+            }
         }
         lootManager = new BungalowLootManager();
         capsuleLootManager = new CapsuleLootManager();
@@ -236,7 +239,7 @@ public final class Thaw extends JavaPlugin {
                 ArcticChunkGenerator gen = ArcticChunkGenerator.getInstance();
                 if (gen == null) return;
 
-                World world = Bukkit.getWorld("Arctic");
+
                 if (world == null) return;
 
                 List<Location> toPlace;
