@@ -21,7 +21,8 @@ public class ArcticChunkGenerator extends ChunkGenerator {
     private static final int CAVE_MAX_Y = 260; // reduce surface cutting; no river-like carving above 180
 
     // Structure size (X x Z)
-
+// near top of class
+    private static final int MAX_CARVE_RADIUS = 12; // tune (>= max sphere radius + overshoot)
 
     // Ore weights (relative rarity baseline, lower is rarer)
     // User-specified
@@ -1757,10 +1758,11 @@ public class ArcticChunkGenerator extends ChunkGenerator {
         int chunkBaseX = (chunkX << 4);
         int chunkBaseZ = (chunkZ << 4);
 
-        int rx0 = Math.floorDiv(chunkBaseX - 1, REGION);
-        int rz0 = Math.floorDiv(chunkBaseZ - 1, REGION);
-        int rx1 = Math.floorDiv(chunkBaseX + 16, REGION);
-        int rz1 = Math.floorDiv(chunkBaseZ + 16, REGION);
+// inside carveCavesV2, compute region bounds using MAX_CARVE_RADIUS
+        int rx0 = Math.floorDiv(chunkBaseX - MAX_CARVE_RADIUS, REGION);
+        int rz0 = Math.floorDiv(chunkBaseZ - MAX_CARVE_RADIUS, REGION);
+        int rx1 = Math.floorDiv(chunkBaseX + 16 + MAX_CARVE_RADIUS - 1, REGION);
+        int rz1 = Math.floorDiv(chunkBaseZ + 16 + MAX_CARVE_RADIUS - 1, REGION);
 
         for (int rx = rx0; rx <= rx1; rx++) {
             for (int rz = rz0; rz <= rz1; rz++) {
