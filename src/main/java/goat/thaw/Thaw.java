@@ -33,6 +33,10 @@ import goat.thaw.system.capsule.CapsuleRegistry;
 import goat.thaw.system.capsule.CapsuleGolemListener;
 import goat.thaw.system.capsule.CapsuleLootManager;
 import goat.thaw.subsystems.eyespy.EyeSpyManager;
+import goat.thaw.system.WolfSpawnListener;
+import org.bukkit.Material;
+import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 
 import java.util.*;
 import goat.thaw.system.dev.BungalowLootManager;
@@ -89,6 +93,7 @@ public final class Thaw extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new SpaceBlockListener(spaceManager), this);
         getServer().getPluginManager().registerEvents(new FirstJoinListener(this), this);
         getServer().getPluginManager().registerEvents(new CapsuleGolemListener(), this);
+        getServer().getPluginManager().registerEvents(new WolfSpawnListener(), this);
         getCommand("locateBungalows").setExecutor(new LocateBungalowsCommand());
 
         // Schematic system
@@ -254,6 +259,7 @@ public final class Thaw extends JavaPlugin {
                 }
 
                 for (Location loc : capsules) {
+                    if (!isValidCapsuleLocation(loc)) continue;
                     String schem = CapsuleRegistry.random();
                     if (schem != null) {
                         schematicManager.placeStructure(schem, loc);
@@ -282,6 +288,49 @@ public final class Thaw extends JavaPlugin {
         if (fireTickManager != null) fireTickManager.stop();
         if (oxygenManager != null) oxygenManager.stop();
         if (eyeSpyManager != null) eyeSpyManager.stop();
+    }
+
+    /**
+     * Checks whether a capsule can spawn at the given location.
+     * A valid location is connected to a cave (has more than one connected air block)
+     * and has at least one stone block within 10 blocks.
+     */
+    private boolean isValidCapsuleLocation(Location loc) {
+        World world = loc.getWorld();
+        if (world == null) return false;
+
+        Block start = world.getBlockAt(loc);
+        if (!isAir(start.getType())) return false;
+
+        int radius = 10;
+        Queue<Block> queue = new ArrayDeque<>();
+        Set<Block> visited = new HashSet<>();
+        queue.add(start);
+        visited.add(start);
+        boolean stoneNearby = false;
+
+        while (!queue.isEmpty()) {
+            Block current = queue.poll();
+            for (BlockFace face : new BlockFace[]{BlockFace.UP, BlockFace.DOWN, BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST}) {
+                Block next = current.getRelative(face);
+                if (next.getLocation().distanceSquared(loc) > radius * radius) continue;
+
+                Material type = next.getType();
+                if (isAir(type)) {
+                    if (visited.add(next)) {
+                        queue.add(next);
+                    }
+                } else if (type == Material.STONE) {
+                    stoneNearby = true;
+                }
+            }
+        }
+
+        return stoneNearby && visited.size() > 1;
+    }
+
+    private boolean isAir(Material type) {
+        return type == Material.AIR || type == Material.CAVE_AIR;
     }
 
     private static class ChunkPos {
