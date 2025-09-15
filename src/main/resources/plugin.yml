@@ -74,6 +74,11 @@ commands:
   locateBungalows:
     description: List and teleport to bungalow locations
     usage: /locateBungalows
+  simulateloottable:
+    description: Open a 27-slot GUI and repeatedly sample a loot table
+    usage: /simulateloottable <name> <instances>
+    permission: thaw.dev
+    permission-message: You must be op to use this.
 permissions:
   thaw.dev:
     description: Access to development commands

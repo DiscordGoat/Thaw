@@ -87,6 +87,14 @@ public final class Thaw extends JavaPlugin {
     public MonumentManager getMonumentManager() {
         return monumentManager;
     }
+
+    public BungalowLootManager getBungalowLootManager() {
+        return lootManager;
+    }
+
+    public CapsuleLootManager getCapsuleLootManager() {
+        return capsuleLootManager;
+    }
     @Override
     public void onEnable() {
         instance = this; // set reference on plugin enable
@@ -118,6 +126,12 @@ public final class Thaw extends JavaPlugin {
         
         if (getCommand("testschem") != null) {
             getCommand("testschem").setExecutor(new TestSchemCommand(schematicManager));
+        }
+
+        if (getCommand("simulateloottable") != null) {
+            SimulateLootTableCommand cmd = new SimulateLootTableCommand(this);
+            getCommand("simulateloottable").setExecutor(cmd);
+            getCommand("simulateloottable").setTabCompleter(cmd);
         }
 
         // Dev commands

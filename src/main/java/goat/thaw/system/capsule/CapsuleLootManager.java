@@ -27,15 +27,26 @@ public class CapsuleLootManager {
     private void initializeLootPopulators() {
         SimpleLootPopulator brown = new SimpleLootPopulator();
         brown.add(Material.AMETHYST_SHARD, 2, 8, 5);
-        brown.add(Material.PURPLE_DYE, 1, 4, 3);
-        brown.add(Material.CHORUS_FRUIT, 1, 2, 1);
+        brown.add(Material.HAY_BLOCK, 1, 6, 1);
+        brown.add(Material.IRON_INGOT, 1, 16, 5);
+        brown.add(Material.DIAMOND, 1, 3, 2);
+        brown.add(Material.WHEAT_SEEDS, 16, 32, 5);
+        brown.add(Material.ENDER_PEARL, 1, 1, 2);
+        brown.add(Material.GOLDEN_APPLE, 1, 1, 2);
         lootPopulators.put("BROWN", brown);
 
 
         SimpleLootPopulator green = new SimpleLootPopulator();
         green.add(Material.AMETHYST_SHARD, 2, 8, 5);
-        green.add(Material.PURPLE_DYE, 1, 4, 3);
         green.add(Material.CHORUS_FRUIT, 1, 2, 1);
+        green.add(Material.HAY_BLOCK, 1, 6, 1);
+        green.add(Material.IRON_INGOT, 1, 16, 5);
+        green.add(Material.DIAMOND, 1, 3, 2);
+        green.add(Material.WHEAT_SEEDS, 16, 32, 5);
+        green.add(Material.ENDER_PEARL, 1, 1, 2);
+        green.add(Material.GOLDEN_APPLE, 1, 1, 2);
+
+
         lootPopulators.put("GREEN", green);
     }
 
@@ -87,6 +98,20 @@ public class CapsuleLootManager {
             int rolls = Math.min(5 + inventory.getSize() / 9, 27);
             populator.populate(inventory, rolls);
         }
+    }
+
+    // Expose available loot table names for dev tools
+    public java.util.Set<String> getAvailableTypes() {
+        return java.util.Collections.unmodifiableSet(lootPopulators.keySet());
+    }
+
+    // Populate any provided Inventory directly by type; returns true if type exists
+    public boolean populateInventory(Inventory inventory, String type) {
+        SimpleLootPopulator populator = lootPopulators.get(type.toUpperCase());
+        if (populator == null) return false;
+        int rolls = Math.min(5 + inventory.getSize() / 9, 27);
+        populator.populate(inventory, rolls);
+        return true;
     }
 }
 

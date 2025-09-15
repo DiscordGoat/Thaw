@@ -25,9 +25,14 @@ public class BungalowLootManager {
     private void initializeLootPopulators() {
         // BURGLAR bungalow
         SimpleLootPopulator burglar = new SimpleLootPopulator();
-        burglar.add(Material.IRON_SWORD, 1, 1, 5);
-        burglar.add(Material.LEATHER_BOOTS, 1, 1, 3);
+        burglar.add(Material.IRON_INGOT, 1, 1, 5);
         burglar.add(Material.GOLD_INGOT, 1, 3, 2);
+        burglar.add(Material.SPRUCE_LOG, 1, 16, 5);
+        burglar.add(Material.STRING, 1, 2, 5);
+        burglar.add(Material.ARROW, 1, 6, 5);
+        burglar.add(Material.BREAD , 1, 5, 5);
+        burglar.add(Material.APPLE , 1, 2, 2);
+        burglar.add(Material.COBBLESTONE , 1, 16, 3);
         lootPopulators.put("BURGLAR", burglar);
 
         // FARMER bungalow
@@ -35,6 +40,14 @@ public class BungalowLootManager {
         farmer.add(Material.WHEAT, 4, 16, 5);
         farmer.add(Material.HAY_BLOCK, 1, 3, 3);
         farmer.add(Material.CARROT, 2, 10, 4);
+        farmer.add(Material.SPRUCE_LOG, 1, 16, 5);
+        farmer.add(Material.STRING, 1, 2, 5);
+        farmer.add(Material.ARROW, 1, 6, 5);
+        farmer.add(Material.BREAD , 1, 10, 5);
+        farmer.add(Material.WHEAT_SEEDS , 1, 10, 5);
+        farmer.add(Material.APPLE , 1, 4, 2);
+        farmer.add(Material.COBBLESTONE , 1, 16, 3);
+
         lootPopulators.put("FARMER", farmer);
 
         // FIRE bungalow
@@ -42,6 +55,13 @@ public class BungalowLootManager {
         fire.add(Material.COAL, 4, 12, 5);
         fire.add(Material.FLINT_AND_STEEL, 1, 1, 2);
         fire.add(Material.MAGMA_CREAM, 1, 2, 1);
+        fire.add(Material.STRING, 1, 2, 5);
+        fire.add(Material.ARROW, 1, 6, 5);
+        fire.add(Material.BREAD , 1, 5, 3);
+        fire.add(Material.APPLE , 1, 2, 2);
+        fire.add(Material.FLINT , 1, 2, 2);
+        fire.add(Material.COBBLESTONE , 1, 16, 3);
+
         lootPopulators.put("FIRE", fire);
 
         // MOURNER bungalow
@@ -49,6 +69,13 @@ public class BungalowLootManager {
         mourner.add(Material.BLACK_CANDLE, 1, 2, 3);
         mourner.add(Material.WITHER_ROSE, 1, 1, 2);
         mourner.add(Material.BONE, 3, 12, 4);
+        mourner.add(Material.SPRUCE_LOG, 1, 16, 5);
+        mourner.add(Material.STRING, 1, 2, 5);
+        mourner.add(Material.ARROW, 1, 6, 5);
+        mourner.add(Material.BREAD , 1, 5, 3);
+        mourner.add(Material.APPLE , 1, 2, 2);
+        mourner.add(Material.COBBLESTONE , 1, 16, 3);
+
         lootPopulators.put("MOURNER", mourner);
 
         // PACIFIST bungalow
@@ -56,6 +83,13 @@ public class BungalowLootManager {
         pacifist.add(Material.BREAD, 2, 8, 5);
         pacifist.add(Material.PAPER, 1, 5, 3);
         pacifist.add(Material.BOOK, 1, 2, 2);
+        pacifist.add(Material.SPRUCE_LOG, 1, 16, 5);
+        pacifist.add(Material.ARROW, 1, 6, 5);
+        pacifist.add(Material.APPLE , 1, 2, 2);
+        pacifist.add(Material.COBBLESTONE , 1, 16, 3);
+
+
+
         lootPopulators.put("PACIFIST", pacifist);
 
         // SCHOLAR bungalow
@@ -63,6 +97,13 @@ public class BungalowLootManager {
         scholar.add(Material.BOOK, 2, 6, 5);
         scholar.add(Material.ENCHANTED_BOOK, 1, 1, 2);
         scholar.add(Material.INK_SAC, 1, 4, 3);
+        scholar.add(Material.SPRUCE_LOG, 1, 16, 5);
+        scholar.add(Material.STRING, 1, 2, 5);
+        scholar.add(Material.ARROW, 1, 6, 5);
+        scholar.add(Material.BREAD , 1, 5, 3);
+        scholar.add(Material.BOOK , 1, 5, 3);
+        scholar.add(Material.APPLE , 1, 2, 2);
+
         lootPopulators.put("SCHOLAR", scholar);
     }
 
@@ -123,6 +164,20 @@ public class BungalowLootManager {
             int rolls = Math.min(5 + inventory.getSize() / 9, 27);
             populator.populate(inventory, rolls);
         }
+    }
+
+    // Expose available loot table names for dev tools
+    public java.util.Set<String> getAvailableTypes() {
+        return java.util.Collections.unmodifiableSet(lootPopulators.keySet());
+    }
+
+    // Populate any provided Inventory directly by type; returns true if type exists
+    public boolean populateInventory(Inventory inventory, String type) {
+        SimpleLootPopulator populator = lootPopulators.get(type.toUpperCase());
+        if (populator == null) return false;
+        int rolls = Math.min(5 + inventory.getSize() / 9, 27);
+        populator.populate(inventory, rolls);
+        return true;
     }
 
     private void populateFurnace(Inventory inventory) {
